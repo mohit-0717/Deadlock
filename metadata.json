@@ -1,0 +1,6 @@
+{
+  "name": "DeadlockLab: Deadlock Analysis & Resource Allocation Dashboard",
+  "description": "Interactive Operating Systems lab for Deadlock Avoidance (Banker's Algorithm), Multi-instance & Single-instance Deadlock Detection, Prevention & Recovery, and RAG Graph Analysis.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
