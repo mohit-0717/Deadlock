@@ -218,26 +218,26 @@ export function runAllTestCases(): TestCaseResult[] {
   // TC3: Request makes state unsafe (Scenario C)
   {
     const baseState = getScenarioA();
-    // Step 1: P1 requests [1, 0, 2] -> Granted
-    const step1 = requestResource(1, [1, 0, 2], baseState);
-    // Step 2: On that new state, P0 requests [0, 2, 0]
-    const step2 = requestResource(0, [0, 2, 0], step1.newState);
+    // From baseline Available [3,3,2], P0 requests [0, 0, 2] <= Need [7,4,3] and <= Available [3,3,2]
+    // Tentative Available becomes [3, 3, 0], leaving all 5 processes unable to finish.
+    const step = requestResource(0, [0, 0, 2], baseState);
     const passed =
-      step1.status === 'SAFE' &&
-      step2.status === 'UNSAFE' &&
-      step2.rollbackPerformed &&
-      step2.newState.available[1] === 3; // Rolled back!
+      step.status === 'UNSAFE' &&
+      !step.granted &&
+      step.rollbackPerformed &&
+      step.newState.available[2] === 2 && // Rolled back!
+      step.trialState?.available[2] === 0;
     results.push({
       id: 'TC3',
       name: 'Request Causes Unsafe State (Rollback)',
-      condition: 'Scenario C: P1 requests [1,0,2] (granted), then P0 requests [0,2,0] causing trial state [2,1,0] where no process can finish',
-      actualStatus: step2.status,
-      actualDetail: 'Request denied; state unchanged (trial rollback executed cleanly)',
+      condition: 'Scenario C: From baseline Available=[3,3,2], P0 requests [0,0,2]; tentative Available=[3,3,0] leaves no process able to finish',
+      actualStatus: step.status,
+      actualDetail: 'Request denied; state unchanged (trial rollback restored Available [3,3,2])',
       expectedStatus: 'UNSAFE',
       expectedDetail: 'Request denied; state unchanged',
       passed,
       analysis: passed
-        ? "Banker's algorithm detected trial state had no safe sequence, denied the request, and restored the original state."
+        ? "Banker's algorithm detected trial state [3,3,0] had no safe sequence, denied the request, and cleanly restored the original state."
         : 'Rollback or unsafe state detection failed.',
     });
   }

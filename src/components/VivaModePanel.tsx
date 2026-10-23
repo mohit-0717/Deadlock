@@ -113,43 +113,45 @@ export const VivaModePanel: React.FC = () => {
   };
 
   return (
-    <div className="bg-slate-900/95 border-2 border-amber-500/50 rounded-2xl p-5 shadow-2xl space-y-4">
+    <div className="bg-white border border-amber-200 rounded-xl p-4 sm:p-5 shadow-2xs space-y-4">
       {/* Header */}
-      <div className="flex items-center justify-between border-b border-slate-800 pb-3">
+      <div className="flex items-center justify-between border-b border-slate-100 pb-3">
         <div className="flex items-center gap-2.5">
-          <div className="p-2 rounded-lg bg-amber-500/20 text-amber-400">
-            <Award className="w-5 h-5" />
+          <div className="p-1.5 rounded-lg bg-amber-50 text-amber-700 border border-amber-200">
+            <Award className="w-4 h-4" />
           </div>
           <div>
-            <h3 className="text-sm font-bold text-slate-100 uppercase tracking-wider flex items-center gap-2">
-              Viva Mode Active: Assessment Practice
-              <span className="text-xs px-2 py-0.5 rounded-full bg-amber-950 text-amber-300 font-mono">
-                Interactive Drill
+            <div className="flex items-center gap-2">
+              <h3 className="text-sm font-bold text-slate-900 font-sans tracking-tight">
+                Viva Assessment Drill &bull; Interactive Oral Exam Mode
+              </h3>
+              <span className="text-[11px] px-2 py-0.5 rounded-md bg-amber-50 text-amber-900 font-sans font-semibold border border-amber-200">
+                Drill Mode
               </span>
-            </h3>
-            <p className="text-xs text-slate-400">
-              Answers and Work vectors hidden until revealed. Test your prediction speed!
+            </div>
+            <p className="text-xs text-slate-500 font-sans mt-0.5">
+              Work vectors and step outcomes are hidden. Predict the next algorithmic state before revealing!
             </p>
           </div>
         </div>
 
-        <div className="flex items-center gap-2 text-xs font-mono">
-          <span className="text-slate-400">Score:</span>
-          <span className="px-2 py-0.5 rounded bg-amber-950 border border-amber-500/40 text-amber-300 font-bold">
+        <div className="flex items-center gap-2 text-xs font-sans">
+          <span className="text-slate-500 font-medium">Score:</span>
+          <span className="px-2 py-0.5 rounded-md bg-amber-50 border border-amber-300 text-amber-900 font-bold font-mono shadow-2xs">
             {score} / {answeredCount}
           </span>
         </div>
       </div>
 
       {/* Question Card */}
-      <div className="p-4 rounded-xl bg-slate-950 border border-slate-800 space-y-3">
-        <div className="flex items-center justify-between text-xs text-slate-400">
-          <span className="font-mono text-amber-400 font-semibold">
+      <div className="p-4 rounded-xl bg-slate-50 border border-slate-200 space-y-3">
+        <div className="flex items-center justify-between text-xs text-slate-500">
+          <span className="font-mono text-amber-800 font-bold">
             Question {currentIdx + 1} of {VIVA_QUESTIONS.length} &bull; {currentQ.topic}
           </span>
         </div>
 
-        <p className="text-sm font-semibold text-slate-100 leading-relaxed">
+        <p className="text-sm font-bold text-slate-900 leading-relaxed font-sans">
           {currentQ.prompt}
         </p>
 
@@ -159,15 +161,15 @@ export const VivaModePanel: React.FC = () => {
             const isSelected = selectedOption === optIdx;
             const isCorrect = currentQ.correctIndex === optIdx;
 
-            let btnStyle = 'bg-slate-900 border-slate-800 text-slate-300 hover:bg-slate-850';
+            let btnStyle = 'bg-white border-slate-200 text-slate-700 hover:bg-slate-100 shadow-2xs';
             if (isSelected && !revealed) {
-              btnStyle = 'bg-blue-950/80 border-blue-500 text-blue-200';
+              btnStyle = 'bg-indigo-50 border-indigo-400 text-indigo-900 font-semibold shadow-xs';
             }
             if (revealed) {
               if (isCorrect) {
-                btnStyle = 'bg-emerald-950/80 border-emerald-500 text-emerald-200 font-semibold';
+                btnStyle = 'bg-emerald-50 border-emerald-400 text-emerald-900 font-bold shadow-xs';
               } else if (isSelected) {
-                btnStyle = 'bg-red-950/80 border-red-500 text-red-200 line-through';
+                btnStyle = 'bg-rose-50 border-rose-300 text-rose-800 line-through opacity-80';
               }
             }
 
@@ -175,12 +177,12 @@ export const VivaModePanel: React.FC = () => {
               <button
                 key={optIdx}
                 onClick={() => handleSelectOption(optIdx)}
-                className={`w-full text-left p-3 rounded-lg border text-xs transition-all flex items-start gap-2.5 cursor-pointer ${btnStyle}`}
+                className={`w-full text-left p-3 rounded-xl border text-xs transition-all flex items-start gap-2.5 cursor-pointer ${btnStyle}`}
               >
-                <span className="font-mono font-bold text-slate-400 shrink-0">
+                <span className="font-mono font-bold text-slate-500 shrink-0">
                   {String.fromCharCode(65 + optIdx)}.
                 </span>
-                <span className="leading-relaxed">{opt}</span>
+                <span className="leading-relaxed font-sans">{opt}</span>
               </button>
             );
           })}
@@ -188,12 +190,12 @@ export const VivaModePanel: React.FC = () => {
 
         {/* Reveal Explanation Banner */}
         {revealed && (
-          <div className="p-3.5 rounded-lg bg-slate-900 border border-slate-700 text-xs space-y-1.5 animate-in fade-in duration-200">
-            <div className="flex items-center gap-1.5 font-bold text-emerald-400">
-              <CheckCircle2 className="w-4 h-4" />
+          <div className="p-3.5 rounded-xl bg-emerald-50 border border-emerald-300 text-xs space-y-1.5 animate-in fade-in duration-200">
+            <div className="flex items-center gap-1.5 font-bold text-emerald-800 font-mono">
+              <CheckCircle2 className="w-4 h-4 text-emerald-600" />
               <span>Viva Explanation &amp; Rationale:</span>
             </div>
-            <p className="text-slate-300 leading-relaxed font-sans">
+            <p className="text-slate-700 leading-relaxed font-sans">
               {currentQ.explanation}
             </p>
           </div>
@@ -205,7 +207,7 @@ export const VivaModePanel: React.FC = () => {
         <button
           onClick={handleReveal}
           disabled={selectedOption === null || revealed}
-          className="px-4 py-2 rounded-lg bg-amber-600 hover:bg-amber-500 disabled:opacity-40 text-white font-semibold text-xs flex items-center gap-1.5 cursor-pointer"
+          className="px-4 py-2 rounded-xl bg-amber-600 hover:bg-amber-700 disabled:opacity-40 text-white font-semibold text-xs flex items-center gap-1.5 cursor-pointer shadow-xs transition-all"
         >
           <Eye className="w-3.5 h-3.5" />
           Reveal Answer &amp; Explanation
@@ -213,7 +215,7 @@ export const VivaModePanel: React.FC = () => {
 
         <button
           onClick={handleNext}
-          className="px-4 py-2 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 font-semibold text-xs flex items-center gap-1.5 cursor-pointer border border-slate-700"
+          className="px-4 py-2 rounded-xl bg-white hover:bg-slate-100 text-slate-700 font-semibold text-xs flex items-center gap-1.5 cursor-pointer border border-slate-300 shadow-2xs transition-all"
         >
           <span>Next Challenge</span>
           <ChevronRight className="w-4 h-4" />

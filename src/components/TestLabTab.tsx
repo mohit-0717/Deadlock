@@ -2,14 +2,10 @@ import React from 'react';
 import {
   FlaskConical,
   Play,
-  Download,
   Copy,
   Printer,
   CheckCircle2,
   XCircle,
-  FileText,
-  ExternalLink,
-  Sparkles,
 } from 'lucide-react';
 import { TestCaseResult } from '../engine/types.js';
 import { runAllTestCases } from '../engine/scenarios.js';
@@ -36,40 +32,6 @@ export const TestLabTab: React.FC<TestLabTabProps> = ({ onLoadScenario }) => {
   const allPassed = testResults.every((t) => t.passed);
   const passCount = testResults.filter((t) => t.passed).length;
 
-  const exportCSV = () => {
-    const headers = ['Test Case', 'System Condition', 'Actual Result', 'Expected Result', 'Pass/Fail', 'Analysis'];
-    const rows = testResults.map((t) => [
-      t.id,
-      `"${t.condition.replace(/"/g, '""')}"`,
-      `"${t.actualDetail.replace(/"/g, '""')}"`,
-      `"${t.expectedDetail.replace(/"/g, '""')}"`,
-      t.passed ? 'PASS' : 'FAIL',
-      `"${t.analysis.replace(/"/g, '""')}"`,
-    ]);
-
-    const csvContent = [headers.join(','), ...rows.map((r) => r.join(','))].join('\n');
-    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement('a');
-    link.setAttribute('href', url);
-    link.setAttribute('download', `DeadlockLab_Test_Suite_TC1_TC6_${Date.now()}.csv`);
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
-  };
-
-  const exportJSON = () => {
-    const jsonStr = JSON.stringify(testResults, null, 2);
-    const blob = new Blob([jsonStr], { type: 'application/json' });
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement('a');
-    link.setAttribute('href', url);
-    link.setAttribute('download', `DeadlockLab_Test_Suite_TC1_TC6_${Date.now()}.json`);
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
-  };
-
   const handleCopyTable = () => {
     const text = testResults
       .map(
@@ -89,29 +51,29 @@ export const TestLabTab: React.FC<TestLabTabProps> = ({ onLoadScenario }) => {
   };
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-4">
       {/* Header and Benchmark Banner */}
-      <div className="bg-slate-900/90 border border-slate-800 rounded-xl p-4 sm:p-5 shadow-sm flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
+      <div className="rounded-xl border border-slate-800 bg-slate-900 text-white p-4 shadow-2xs flex flex-col md:flex-row items-start md:items-center justify-between gap-3">
         <div>
-          <div className="flex items-center gap-2.5 mb-1">
-            <div className="p-1.5 rounded-md bg-blue-500/20 text-blue-400">
+          <div className="flex items-center gap-2.5 mb-1.5">
+            <div className="p-1.5 rounded-lg bg-indigo-600 text-white shadow-2xs">
               <FlaskConical className="w-4 h-4" />
             </div>
-            <h3 className="text-sm font-bold text-slate-100 uppercase tracking-wider">
-              Verification Test Lab (TC1 &ndash; TC6)
+            <h3 className="text-sm sm:text-base font-extrabold text-white font-sans tracking-tight">
+              Algorithmic Verification Test Lab (TC1 &ndash; TC6)
             </h3>
             <span
-              className={`text-xs px-2.5 py-0.5 rounded-full font-bold font-mono border ${
+              className={`text-xs px-2.5 py-0.5 rounded-md font-sans font-bold border ${
                 allPassed
-                  ? 'bg-emerald-950/80 text-emerald-400 border-emerald-500/50'
-                  : 'bg-red-950/80 text-red-400 border-red-500/50'
+                  ? 'bg-emerald-950 text-emerald-300 border-emerald-700'
+                  : 'bg-rose-950 text-rose-300 border-rose-700'
               }`}
             >
               {passCount} / {testResults.length} Tests Passing
             </span>
           </div>
-          <p className="text-xs text-slate-400">
-            Automated test runner testing engine invariants against all OS assignment specification requirements.
+          <p className="text-xs sm:text-sm text-slate-300 font-sans">
+            Automated test suite verifying dynamic avoidance, Wait-For Graph reduction, and state rollback invariants.
           </p>
         </div>
 
@@ -120,111 +82,95 @@ export const TestLabTab: React.FC<TestLabTabProps> = ({ onLoadScenario }) => {
           <button
             onClick={handleRunAll}
             disabled={isRunning}
-            className="px-3.5 py-1.5 rounded-lg bg-blue-600 hover:bg-blue-500 text-white font-semibold text-xs flex items-center gap-1.5 shadow-md hover:shadow-blue-500/20 transition-all cursor-pointer"
+            className="px-3.5 py-2 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white font-sans font-bold text-xs sm:text-sm flex items-center gap-2 shadow-2xs transition-colors cursor-pointer"
           >
-            <Play className="w-3.5 h-3.5" />
-            {isRunning ? 'Executing Engine...' : 'Run All Tests'}
+            <Play className="w-4 h-4" />
+            <span>{isRunning ? 'Running Engine...' : 'Run All Tests'}</span>
           </button>
 
           <button
             onClick={handleCopyTable}
-            className="px-2.5 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 text-xs font-medium flex items-center gap-1 cursor-pointer"
+            className="px-3 py-2 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 text-xs sm:text-sm font-sans font-semibold flex items-center gap-1.5 cursor-pointer transition-colors shadow-2xs"
           >
-            <Copy className="w-3.5 h-3.5" />
-            {copied ? 'Copied!' : 'Copy Table'}
-          </button>
-
-          <button
-            onClick={exportCSV}
-            className="px-2.5 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 text-xs font-medium flex items-center gap-1 cursor-pointer"
-          >
-            <Download className="w-3.5 h-3.5" />
-            CSV
-          </button>
-
-          <button
-            onClick={exportJSON}
-            className="px-2.5 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 text-xs font-medium flex items-center gap-1 cursor-pointer"
-          >
-            <Download className="w-3.5 h-3.5" />
-            JSON
+            <Copy className="w-3.5 h-3.5 text-slate-400" />
+            <span>{copied ? 'Copied!' : 'Copy Summary'}</span>
           </button>
 
           <button
             onClick={handlePrint}
-            className="px-2.5 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 text-xs font-medium flex items-center gap-1 cursor-pointer"
+            className="px-3 py-2 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 text-xs sm:text-sm font-sans font-semibold flex items-center gap-1.5 cursor-pointer transition-colors shadow-2xs"
           >
-            <Printer className="w-3.5 h-3.5" />
-            Print View
+            <Printer className="w-3.5 h-3.5 text-slate-400" />
+            <span>Print</span>
           </button>
         </div>
       </div>
 
       {/* Dynamic Results Table */}
-      <div className="bg-slate-900/90 border border-slate-800 rounded-xl overflow-hidden shadow-lg">
+      <div className="rounded-xl border border-slate-200 bg-white overflow-hidden shadow-2xs">
         <div className="overflow-x-auto">
-          <table className="w-full text-left text-xs border-collapse">
+          <table className="w-full table-fixed text-left text-xs sm:text-sm border-collapse font-mono">
             <thead>
-              <tr className="bg-slate-950 border-b border-slate-800 text-slate-400 font-mono text-[11px] uppercase tracking-wider">
-                <th className="py-3 px-3 w-16">Test ID</th>
-                <th className="py-3 px-3 w-48">System Condition</th>
-                <th className="py-3 px-3 w-56">Actual Result (Engine)</th>
-                <th className="py-3 px-3 w-48">Expected Result</th>
-                <th className="py-3 px-3 w-28 text-center">Status</th>
-                <th className="py-3 px-3">Analysis / Conclusion</th>
+              <tr className="bg-slate-900 border-b border-slate-800 text-white font-mono text-xs uppercase tracking-wider">
+                <th className="py-3.5 px-3.5 w-1/6 font-bold">Test ID</th>
+                <th className="py-3.5 px-3.5 w-1/6 font-bold">System Condition</th>
+                <th className="py-3.5 px-3.5 w-1/6 font-bold">Actual Result (Engine)</th>
+                <th className="py-3.5 px-3.5 w-1/6 font-bold">Expected Result</th>
+                <th className="py-3.5 px-3.5 w-1/6 text-center font-bold">Status</th>
+                <th className="py-3.5 px-3.5 w-1/6 font-bold">Analysis / Conclusion</th>
               </tr>
             </thead>
-            <tbody className="divide-y divide-slate-800/80">
+            <tbody className="divide-y divide-slate-100 text-xs sm:text-sm">
               {testResults.map((tc) => (
-                <tr key={tc.id} className="hover:bg-slate-800/40 transition-colors">
-                  <td className="py-3 px-3 font-mono font-bold text-blue-300">
-                    <div>{tc.id}</div>
-                    <div className="text-[10px] text-slate-400 font-sans font-normal">{tc.name}</div>
+                <tr key={tc.id} className="hover:bg-slate-50/80 transition-colors">
+                  <td className="py-3.5 px-3.5 align-top font-mono font-bold text-indigo-700 break-words">
+                    <div className="text-sm">{tc.id}</div>
+                    <div className="text-xs text-slate-500 font-sans font-normal mt-0.5">{tc.name}</div>
                   </td>
 
-                  <td className="py-3 px-3 text-slate-300 font-mono text-[11px] leading-relaxed">
+                  <td className="py-3.5 px-3.5 align-top text-slate-800 font-mono text-xs leading-relaxed font-semibold break-words">
                     {tc.condition}
                   </td>
 
-                  <td className="py-3 px-3">
-                    <div className="mb-1">
+                  <td className="py-3.5 px-3.5 align-top break-words">
+                    <div className="mb-1.5">
                       <StatusBadge status={tc.actualStatus} size="sm" />
                     </div>
-                    <span className="text-[11px] text-slate-200 font-medium block">
+                    <span className="text-xs text-slate-900 font-bold block leading-relaxed">
                       {tc.actualDetail}
                     </span>
                   </td>
 
-                  <td className="py-3 px-3">
-                    <span className="text-[11px] font-semibold text-slate-300 block">
+                  <td className="py-3.5 px-3.5 align-top break-words">
+                    <span className="text-xs font-bold text-slate-800 block leading-relaxed">
                       &ldquo;{tc.expectedDetail}&rdquo;
                     </span>
-                    <span className="text-[10px] font-mono text-slate-500">
+                    <span className="text-xs font-mono text-slate-500 font-semibold block mt-1">
                       State: {tc.expectedStatus}
                     </span>
                   </td>
 
-                  <td className="py-3 px-3 text-center">
+                  <td className="py-3.5 px-3.5 align-top text-center">
                     <span
-                      className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-full font-bold font-mono text-xs ${
+                      className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-md font-bold font-mono text-xs shadow-2xs ${
                         tc.passed
-                          ? 'bg-emerald-950/80 text-emerald-400 border border-emerald-500/50'
-                          : 'bg-red-950/80 text-red-400 border border-red-500/50'
+                          ? 'bg-emerald-100 text-emerald-900 border border-emerald-300'
+                          : 'bg-rose-100 text-rose-900 border border-rose-300'
                       }`}
                     >
                       {tc.passed ? (
                         <>
-                          <CheckCircle2 className="w-3.5 h-3.5" /> PASS
+                          <CheckCircle2 className="w-4 h-4 text-emerald-600" /> PASS
                         </>
                       ) : (
                         <>
-                          <XCircle className="w-3.5 h-3.5" /> FAIL
+                          <XCircle className="w-4 h-4 text-rose-600" /> FAIL
                         </>
                       )}
                     </span>
                   </td>
 
-                  <td className="py-3 px-3 text-slate-300 text-[11px] leading-relaxed">
+                  <td className="py-3.5 px-3.5 align-top text-slate-700 text-xs font-sans leading-relaxed break-words">
                     {tc.analysis}
                   </td>
                 </tr>

@@ -148,10 +148,10 @@ export const AIUsageRecordTab: React.FC = () => {
   return (
     <div className="space-y-6">
       {/* Confidentiality Warning Banner (Mandatory Rule 12) */}
-      <div className="p-4 rounded-xl bg-amber-950/70 border-2 border-amber-500 text-amber-200 text-xs flex items-center justify-between gap-3 shadow-md">
+      <div className="p-4 rounded-xl bg-amber-50 border-2 border-amber-400 text-amber-900 text-xs flex items-center justify-between gap-3 shadow-xs">
         <div className="flex items-center gap-3">
-          <ShieldAlert className="w-5 h-5 text-amber-400 shrink-0" />
-          <p className="font-semibold text-amber-100">
+          <ShieldAlert className="w-5 h-5 text-amber-600 shrink-0" />
+          <p className="font-semibold text-amber-950">
             <strong>Mandatory Academic Policy Reminder:</strong> Do not enter confidential or personal data into AI usage records.
             All AI tools used for course assessment must be disclosed with specific student verification.
           </p>
@@ -159,49 +159,49 @@ export const AIUsageRecordTab: React.FC = () => {
       </div>
 
       {/* Header & Controls */}
-      <div className="bg-slate-900/90 border border-slate-800 rounded-xl p-4 sm:p-5 shadow-sm flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
+      <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-2xs flex flex-col md:flex-row items-start md:items-center justify-between gap-3">
         <div>
           <div className="flex items-center gap-2 mb-1">
-            <div className="p-1.5 rounded-md bg-purple-500/20 text-purple-400">
+            <div className="p-1.5 rounded-lg bg-slate-100 text-slate-700 border border-slate-200">
               <Bot className="w-4 h-4" />
             </div>
-            <h3 className="text-sm font-bold text-slate-100 uppercase tracking-wider">
+            <h3 className="text-sm font-bold text-slate-900 font-sans tracking-tight">
               AI Usage Record &amp; Verification Audit
             </h3>
           </div>
-          <p className="text-xs text-slate-400">
+          <p className="text-xs text-slate-500 font-sans">
             Documenting transparency, generative tool prompts, and student code validation for academic integrity assessment.
           </p>
         </div>
 
-        <div className="flex flex-wrap items-center gap-2">
+        <div className="flex flex-wrap items-center gap-1.5">
           <button
             onClick={handleAddRow}
-            className="px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 text-xs font-medium flex items-center gap-1.5 cursor-pointer"
+            className="px-2.5 py-1.5 rounded-lg bg-white hover:bg-slate-50 text-slate-700 border border-slate-300 text-xs font-sans font-medium flex items-center gap-1.5 cursor-pointer transition-colors shadow-2xs"
           >
             <Plus className="w-3.5 h-3.5" />
-            Add Row
+            <span>Add Row</span>
           </button>
 
           <button
             onClick={handleSave}
-            className="px-3 py-1.5 rounded-lg bg-blue-600 hover:bg-blue-500 text-white font-semibold text-xs flex items-center gap-1.5 shadow-md cursor-pointer"
+            className="px-2.5 py-1.5 rounded-lg bg-slate-900 hover:bg-slate-800 text-white font-semibold text-xs font-sans flex items-center gap-1.5 shadow-2xs cursor-pointer transition-colors"
           >
-            {savedNotification ? <Check className="w-3.5 h-3.5" /> : <Save className="w-3.5 h-3.5" />}
-            {savedNotification ? 'Saved!' : 'Save Changes'}
+            {savedNotification ? <Check className="w-3.5 h-3.5 text-emerald-400" /> : <Save className="w-3.5 h-3.5" />}
+            <span>{savedNotification ? 'Saved!' : 'Save'}</span>
           </button>
 
           <button
             onClick={exportRecord}
-            className="px-2.5 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 text-xs font-medium flex items-center gap-1 cursor-pointer"
+            className="px-2.5 py-1.5 rounded-lg bg-white hover:bg-slate-50 text-slate-700 border border-slate-300 text-xs font-sans font-medium flex items-center gap-1 cursor-pointer transition-colors shadow-2xs"
           >
-            <Download className="w-3.5 h-3.5" />
-            Export Audit
+            <Download className="w-3.5 h-3.5 text-slate-400" />
+            <span>Export</span>
           </button>
 
           <button
             onClick={handleReset}
-            className="p-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-700 text-xs cursor-pointer"
+            className="p-1.5 rounded-lg bg-white hover:bg-slate-50 text-slate-500 border border-slate-300 text-xs font-sans cursor-pointer transition-colors shadow-2xs"
             title="Reset to Template Defaults"
           >
             <RotateCcw className="w-3.5 h-3.5" />
@@ -210,28 +210,28 @@ export const AIUsageRecordTab: React.FC = () => {
       </div>
 
       {/* Editable Table */}
-      <div className="bg-slate-900/90 border border-slate-800 rounded-xl overflow-hidden shadow-lg">
+      <div className="rounded-2xl border border-slate-200 bg-white overflow-hidden shadow-xs">
         <div className="overflow-x-auto">
-          <table className="w-full text-left text-xs border-collapse">
+          <table className="w-full text-left text-xs border-collapse font-mono">
             <thead>
-              <tr className="bg-slate-950 border-b border-slate-800 text-slate-400 font-mono text-[11px] uppercase tracking-wider">
-                <th className="py-3 px-3 w-48">AI Tool Used</th>
-                <th className="py-3 px-3 w-56">Purpose</th>
-                <th className="py-3 px-3 w-72">Output Generated</th>
-                <th className="py-3 px-3">Student Verification</th>
-                <th className="py-3 px-2 w-12 text-center">Action</th>
+              <tr className="bg-slate-50 border-b border-slate-200 text-slate-600 font-mono text-[11px] uppercase tracking-wider">
+                <th className="py-3 px-3 w-48 font-bold">AI Tool Used</th>
+                <th className="py-3 px-3 w-56 font-bold">Purpose</th>
+                <th className="py-3 px-3 w-72 font-bold">Output Generated</th>
+                <th className="py-3 px-3 font-bold">Student Verification</th>
+                <th className="py-3 px-2 w-12 text-center font-bold">Action</th>
               </tr>
             </thead>
-            <tbody className="divide-y divide-slate-800/70">
+            <tbody className="divide-y divide-slate-100">
               {rows.map((row) => (
-                <tr key={row.id} className="hover:bg-slate-800/30 transition-colors">
+                <tr key={row.id} className="hover:bg-slate-50/70 transition-colors">
                   <td className="py-2.5 px-3 align-top">
                     <input
                       type="text"
                       value={row.toolUsed}
                       onChange={(e) => handleRowChange(row.id, 'toolUsed', e.target.value)}
                       placeholder="e.g. Gemini 2.5 Flash"
-                      className="w-full px-2 py-1.5 bg-slate-950 border border-slate-700 rounded text-slate-100 font-mono text-xs focus:border-blue-500 focus:outline-none"
+                      className="w-full px-2.5 py-1.5 bg-slate-50 border border-slate-300 rounded-lg text-slate-900 font-mono text-xs focus:border-indigo-500 focus:bg-white focus:outline-none shadow-2xs"
                     />
                   </td>
 
@@ -241,7 +241,7 @@ export const AIUsageRecordTab: React.FC = () => {
                       value={row.purpose}
                       onChange={(e) => handleRowChange(row.id, 'purpose', e.target.value)}
                       placeholder="Describe intent or role..."
-                      className="w-full px-2 py-1 bg-slate-950 border border-slate-700 rounded text-slate-200 text-xs focus:border-blue-500 focus:outline-none resize-y"
+                      className="w-full px-2.5 py-1 bg-slate-50 border border-slate-300 rounded-lg text-slate-800 text-xs focus:border-indigo-500 focus:bg-white focus:outline-none resize-y shadow-2xs"
                     />
                   </td>
 
@@ -251,7 +251,7 @@ export const AIUsageRecordTab: React.FC = () => {
                       value={row.outputGenerated}
                       onChange={(e) => handleRowChange(row.id, 'outputGenerated', e.target.value)}
                       placeholder="Code or design generated..."
-                      className="w-full px-2 py-1 bg-slate-950 border border-slate-700 rounded text-slate-200 text-xs focus:border-blue-500 focus:outline-none resize-y"
+                      className="w-full px-2.5 py-1 bg-slate-50 border border-slate-300 rounded-lg text-slate-800 text-xs focus:border-indigo-500 focus:bg-white focus:outline-none resize-y shadow-2xs"
                     />
                   </td>
 
@@ -261,7 +261,7 @@ export const AIUsageRecordTab: React.FC = () => {
                       value={row.studentVerification}
                       onChange={(e) => handleRowChange(row.id, 'studentVerification', e.target.value)}
                       placeholder="How did you test, audit, or verify the correctness?"
-                      className="w-full px-2 py-1 bg-slate-950 border border-slate-700 rounded text-emerald-300 font-mono text-xs focus:border-emerald-500 focus:outline-none resize-y"
+                      className="w-full px-2.5 py-1 bg-slate-50 border border-slate-300 rounded-lg text-emerald-800 font-mono text-xs focus:border-emerald-500 focus:bg-white focus:outline-none resize-y shadow-2xs"
                     />
                   </td>
 
@@ -269,7 +269,7 @@ export const AIUsageRecordTab: React.FC = () => {
                     <button
                       onClick={() => handleDeleteRow(row.id)}
                       disabled={rows.length <= 1}
-                      className="p-1.5 rounded hover:bg-red-950/60 text-slate-500 hover:text-red-400 disabled:opacity-30 cursor-pointer"
+                      className="p-1.5 rounded hover:bg-rose-50 text-slate-400 hover:text-rose-600 disabled:opacity-30 cursor-pointer"
                       title="Delete entry"
                     >
                       <Trash2 className="w-3.5 h-3.5" />
@@ -283,13 +283,13 @@ export const AIUsageRecordTab: React.FC = () => {
       </div>
 
       {/* Issues Found & Fixed Notes Box (Mandatory Rule 12) */}
-      <div className="bg-slate-900/90 border border-slate-800 rounded-xl p-4 sm:p-5 shadow-lg space-y-3">
-        <div className="flex items-center justify-between border-b border-slate-800 pb-2">
-          <h4 className="text-xs font-bold text-slate-100 uppercase tracking-wider flex items-center gap-2">
+      <div className="bg-white border border-slate-200 rounded-2xl p-4 sm:p-5 shadow-xs space-y-3">
+        <div className="flex items-center justify-between border-b border-slate-100 pb-2">
+          <h4 className="text-xs font-bold text-slate-900 uppercase tracking-wider flex items-center gap-2">
             <span>Issues Found and Fixed During Student Verification</span>
-            <span className="text-[10px] text-slate-400 font-mono">Viva Audit Log</span>
+            <span className="text-[10px] text-slate-500 font-mono">Viva Audit Log</span>
           </h4>
-          <span className="text-[11px] text-emerald-400 font-mono">
+          <span className="text-[11px] text-emerald-700 font-mono font-semibold">
             Auto-syncs to local storage
           </span>
         </div>
@@ -302,7 +302,7 @@ export const AIUsageRecordTab: React.FC = () => {
             localStorage.setItem(NOTES_KEY, e.target.value);
           }}
           placeholder="Record any algorithm edge-cases, math discrepancies, or styling bugs identified and corrected..."
-          className="w-full p-3 bg-slate-950 border border-slate-850 rounded-lg text-slate-200 font-mono text-xs focus:border-blue-500 focus:outline-none leading-relaxed"
+          className="w-full p-3 bg-slate-50 border border-slate-300 rounded-xl text-slate-800 font-mono text-xs focus:border-indigo-500 focus:bg-white focus:outline-none leading-relaxed shadow-2xs"
         />
       </div>
     </div>

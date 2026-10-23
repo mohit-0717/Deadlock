@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import {
   Lock,
   Unlock,
@@ -10,11 +10,10 @@ import {
   GitBranch,
   ShieldAlert,
   Info,
-  Sparkles,
   ArrowRight,
   Radio,
-  Activity,
   Layers,
+  Cpu,
 } from 'lucide-react';
 import {
   DetectionResult,
@@ -37,10 +36,21 @@ import {
 import { StatusBadge } from './StatusBadge.js';
 import { RAGGraphView } from './RAGGraphView.js';
 
+export interface DetectionContextData {
+  scenarioPreset: ExamplePreset;
+  scenarioName: string;
+  method: string;
+  available: number[];
+  work: number[];
+  deadlockedNames: string[];
+  hasDeadlock: boolean;
+}
+
 interface DetectionTabProps {
   speed: number;
   reduceMotion: boolean;
   onStatusChange?: (status: SystemStatus) => void;
+  onDetectionContextChange?: (ctx: DetectionContextData) => void;
 }
 
 type ExamplePreset = 'D1' | 'D2' | 'D2_VARIANT' | 'D3';
@@ -49,26 +59,34 @@ export const DetectionTab: React.FC<DetectionTabProps> = ({
   speed,
   reduceMotion,
   onStatusChange,
+  onDetectionContextChange,
 }) => {
-  const [selectedPreset, setSelectedPreset] = React.useState<ExamplePreset>('D2');
+  const [selectedPreset, setSelectedPreset] = useState<ExamplePreset>('D2');
 
   // Working state for detection
-  const [allocation, setAllocation] = React.useState<number[][]>(() => getScenarioD2().allocation);
-  const [request, setRequest] = React.useState<number[][]>(() => getScenarioD2().request);
-  const [available, setAvailable] = React.useState<number[]>(() => getScenarioD2().available);
-  const [totalInstances, setTotalInstances] = React.useState<number[] | undefined>(() => getScenarioD2().totalInstances);
-  const [processNames, setProcessNames] = React.useState<string[]>(() => getScenarioD2().processNames);
-  const [resourceNames, setResourceNames] = React.useState<string[]>(() => getScenarioD2().resourceNames);
+  const [allocation, setAllocation] = useState<number[][]>(() => getScenarioD2().allocation);
+  const [request, setRequest] = useState<number[][]>(() => getScenarioD2().request);
+  const [available, setAvailable] = useState<number[]>(() => getScenarioD2().available);
+  const [totalInstances, setTotalInstances] = useState<number[] | undefined>(() => getScenarioD2().totalInstances);
+  const [processNames, setProcessNames] = useState<string[]>(() => getScenarioD2().processNames);
+  const [resourceNames, setResourceNames] = useState<string[]>(() => getScenarioD2().resourceNames);
 
   // Recovery state
-  const [terminatedProcessId, setTerminatedProcessId] = React.useState<number | null>(null);
-  const [recoveryLog, setRecoveryLog] = React.useState<string | null>(null);
-  const [isTerminatingAnimation, setIsTerminatingAnimation] = React.useState(false);
+  const [terminatedProcessId, setTerminatedProcessId] = useState<number | null>(null);
+  const [recoveryOutcome, setRecoveryOutcome] = useState<{
+    procName: string;
+    releasedStr: string;
+    newAvailable: number[];
+    isResolved: boolean;
+    remainingBlocked: string[];
+    resolvedOrder?: string[];
+  } | null>(null);
+  const [isTerminatingAnimation, setIsTerminatingAnimation] = useState(false);
 
   const isSingleInstance = selectedPreset === 'D1';
 
   // Compute detection result
-  const detectionResult: DetectionResult = React.useMemo(() => {
+  const detectionResult: DetectionResult = useMemo(() => {
     if (isSingleInstance) {
       return detectDeadlockSingleInstance(allocation, request, available, processNames, resourceNames);
     } else {
@@ -77,22 +95,78 @@ export const DetectionTab: React.FC<DetectionTabProps> = ({
   }, [allocation, request, available, processNames, resourceNames, isSingleInstance]);
 
   // Compute RAG Graph
-  const ragGraph: RAGGraph = React.useMemo(() => {
+  const ragGraph: RAGGraph = useMemo(() => {
     return buildRAG(allocation, request, available, totalInstances, processNames, resourceNames);
   }, [allocation, request, available, totalInstances, processNames, resourceNames]);
 
   // Sync status
-  React.useEffect(() => {
+  useEffect(() => {
     if (onStatusChange) {
       onStatusChange(detectionResult.status);
     }
   }, [detectionResult, onStatusChange]);
 
+  // Sync active module context with Executive Command Strip in App.tsx (Requirement 1)
+  useEffect(() => {
+    if (onDetectionContextChange) {
+      const scenarioTitles: Record<ExamplePreset, { name: string; method: string }> = {
+        D1: { name: 'D1: Single-Instance Cycle', method: 'Wait-For Graph (Cycle ⇔ Deadlock)' },
+        D2: { name: 'D2: Multi-Instance Deadlock', method: 'Matrix Reduction (O(m·n²))' },
+        D2_VARIANT: { name: 'D2 Variant (P2 Request [0,0,0])', method: 'Matrix Reduction (O(m·n²))' },
+        D3: { name: 'D3: Multi-Instance (Cycle ≠ Deadlock)', method: 'Matrix Reduction (O(m·n²))' },
+      };
+
+      onDetectionContextChange({
+        scenarioPreset: selectedPreset,
+        scenarioName: scenarioTitles[selectedPreset].name,
+        method: scenarioTitles[selectedPreset].method,
+        available,
+        work: detectionResult.finalWork,
+        deadlockedNames: detectionResult.deadlockedProcessNames,
+        hasDeadlock: detectionResult.hasDeadlock,
+      });
+    }
+  }, [selectedPreset, available, detectionResult, onDetectionContextChange]);
+
+  // Dynamic explanation of matrix reduction halt & process deficits (Requirement 3)
+  const reductionDeficits = useMemo(() => {
+    if (!detectionResult.hasDeadlock) return null;
+    const finalWork = detectionResult.finalWork;
+    const blockedList: {
+      processName: string;
+      processId: number;
+      request: number[];
+      deficits: string[];
+    }[] = [];
+
+    detectionResult.deadlockedProcessIds.forEach((pId) => {
+      const pReq = request[pId];
+      const deficits: string[] = [];
+      pReq.forEach((amt, rIdx) => {
+        if (amt > finalWork[rIdx]) {
+          const rName = resourceNames[rIdx] || String.fromCharCode(65 + rIdx);
+          deficits.push(`${rName}: Req ${amt} > Work ${finalWork[rIdx]} (+${amt - finalWork[rIdx]} deficit)`);
+        }
+      });
+      blockedList.push({
+        processName: processNames[pId],
+        processId: pId,
+        request: pReq,
+        deficits,
+      });
+    });
+
+    return {
+      finalWork,
+      blockedList,
+    };
+  }, [detectionResult, request, resourceNames, processNames]);
+
   // Switch presets
   const loadPreset = (preset: ExamplePreset) => {
     setSelectedPreset(preset);
     setTerminatedProcessId(null);
-    setRecoveryLog(null);
+    setRecoveryOutcome(null);
     setIsTerminatingAnimation(false);
 
     if (preset === 'D1') {
@@ -130,7 +204,7 @@ export const DetectionTab: React.FC<DetectionTabProps> = ({
     }
   };
 
-  // Perform process termination & recovery
+  // Perform process termination & recovery (Requirement 4)
   const handleTerminate = (procId: number) => {
     setIsTerminatingAnimation(true);
     setTerminatedProcessId(procId);
@@ -155,45 +229,51 @@ export const DetectionTab: React.FC<DetectionTabProps> = ({
         .map((amt, idx) => `${resourceNames[idx] || idx}=${amt}`)
         .join(', ');
 
-      setRecoveryLog(
-        `Process ${pName} terminated. Reclaimed [${relStr}] back into Available pool. Post-termination detection reports: ${
-          recovery.detectionResult.hasDeadlock ? 'Deadlock still persists' : 'DEADLOCK BROKEN! All processes can now complete.'
-        }`
-      );
+      const isResolved = !recovery.detectionResult.hasDeadlock;
+      const remainingBlocked = recovery.detectionResult.deadlockedProcessNames;
+      const resolvedOrder = recovery.detectionResult.resolvedProcessIds.map((id) => processNames[id]);
+
+      setRecoveryOutcome({
+        procName: pName,
+        releasedStr: relStr,
+        newAvailable: recovery.newAvailable,
+        isResolved,
+        remainingBlocked,
+        resolvedOrder,
+      });
+
       setIsTerminatingAnimation(false);
     }, 600 / speed);
   };
 
   return (
-    <div className="space-y-6">
-      {/* Preset Selector Header */}
-      <div className="cockpit-glass rounded-2xl p-4 sm:p-5 shadow-xl border border-cyan-500/20 flex flex-wrap items-center justify-between gap-4">
+    <div className="space-y-4">
+      {/* 1. Executive Scenario Preset Strip */}
+      <div className="bg-slate-900 rounded-xl p-3.5 shadow-2xs border border-slate-800 flex flex-wrap items-center justify-between gap-3 text-white">
         <div className="flex items-center gap-3">
-          <div className="p-2 rounded-xl bg-cyan-500/15 text-cyan-300 border border-cyan-500/30 shadow-[0_0_10px_rgba(6,182,212,0.2)]">
-            <Radio className="w-4 h-4 text-cyan-400 animate-pulse" />
+          <div className="p-1.5 rounded-md bg-indigo-600 text-white font-mono text-xs font-bold shadow-2xs">
+            RAG
           </div>
           <div>
-            <div className="flex items-center gap-2">
-              <h3 className="text-sm font-bold text-slate-100 uppercase tracking-widest font-mono">
-                Detection Benchmark Flight Cases
+            <div className="flex items-center gap-2.5">
+              <h3 className="text-sm font-extrabold text-white font-sans tracking-tight">
+                Deadlock Detection &amp; Recovery Workbench
               </h3>
-              <span className="text-[10px] px-2 py-0.5 rounded-full bg-cyan-950/80 text-cyan-300 font-mono border border-cyan-500/40">
-                {isSingleInstance ? 'Single-Instance (WFG)' : 'Multi-Instance (Matrix)'}
+              <span className="text-xs px-2.5 py-0.5 rounded-full bg-slate-800 text-indigo-300 font-sans font-semibold border border-slate-700">
+                {isSingleInstance ? 'Single-Instance (WFG Cycle)' : 'Multi-Instance (Matrix Reduction)'}
               </span>
             </div>
-            <p className="text-[11px] text-slate-400 font-mono mt-0.5">
-              Wait-For Graph Cycle Detection vs. Multi-Instance Matrix Reduction
-            </p>
           </div>
         </div>
 
-        <div className="flex flex-wrap items-center gap-2">
+        {/* Preset Selector Buttons */}
+        <div className="flex flex-wrap items-center gap-1.5 text-xs font-sans">
           <button
             onClick={() => loadPreset('D1')}
-            className={`px-3 py-1.5 rounded-xl text-xs font-mono font-bold border transition-all cursor-pointer ${
+            className={`px-3 py-1.5 rounded-md text-xs font-bold border transition-colors cursor-pointer shadow-2xs ${
               selectedPreset === 'D1'
-                ? 'bg-blue-600 border-blue-400 text-white shadow-[0_0_12px_rgba(59,130,246,0.4)]'
-                : 'bg-slate-900/80 hover:bg-slate-800 text-slate-300 border-slate-700'
+                ? 'bg-indigo-600 border-indigo-500 text-white'
+                : 'bg-slate-800 hover:bg-slate-700 text-slate-200 border-slate-700'
             }`}
           >
             D1: Single-Instance Cycle
@@ -201,10 +281,10 @@ export const DetectionTab: React.FC<DetectionTabProps> = ({
 
           <button
             onClick={() => loadPreset('D2')}
-            className={`px-3 py-1.5 rounded-xl text-xs font-mono font-bold border transition-all cursor-pointer ${
+            className={`px-3 py-1.5 rounded-md text-xs font-bold border transition-colors cursor-pointer shadow-2xs ${
               selectedPreset === 'D2'
-                ? 'bg-rose-600 border-rose-400 text-white shadow-[0_0_12px_rgba(244,63,94,0.4)]'
-                : 'bg-slate-900/80 hover:bg-slate-800 text-slate-300 border-slate-700'
+                ? 'bg-rose-700 border-rose-600 text-white'
+                : 'bg-slate-800 hover:bg-slate-700 text-slate-200 border-slate-700'
             }`}
           >
             D2: Multi-Instance Deadlock
@@ -212,274 +292,363 @@ export const DetectionTab: React.FC<DetectionTabProps> = ({
 
           <button
             onClick={() => loadPreset('D2_VARIANT')}
-            className={`px-3 py-1.5 rounded-xl text-xs font-mono font-bold border transition-all cursor-pointer ${
+            className={`px-3 py-1.5 rounded-md text-xs font-bold border transition-colors cursor-pointer shadow-2xs ${
               selectedPreset === 'D2_VARIANT'
-                ? 'bg-emerald-600 border-emerald-400 text-white shadow-[0_0_12px_rgba(16,185,129,0.4)]'
-                : 'bg-slate-900/80 hover:bg-slate-800 text-slate-300 border-slate-700'
+                ? 'bg-emerald-700 border-emerald-600 text-white'
+                : 'bg-slate-800 hover:bg-slate-700 text-slate-200 border-slate-700'
             }`}
           >
-            D2 Variant (P2 Req=0 &rarr; Safe)
+            D2 Variant (Safe)
           </button>
 
           <button
             onClick={() => loadPreset('D3')}
-            className={`px-3 py-1.5 rounded-xl text-xs font-mono font-bold border transition-all cursor-pointer ${
+            className={`px-3 py-1.5 rounded-md text-xs font-bold border transition-colors cursor-pointer shadow-2xs ${
               selectedPreset === 'D3'
-                ? 'bg-purple-600 border-purple-400 text-white shadow-[0_0_12px_rgba(168,85,247,0.4)]'
-                : 'bg-slate-900/80 hover:bg-slate-800 text-slate-300 border-slate-700'
+                ? 'bg-indigo-700 border-indigo-600 text-white'
+                : 'bg-slate-800 hover:bg-slate-700 text-slate-200 border-slate-700'
             }`}
           >
-            D3: Cycle but NOT Deadlock!
+            D3: Cycle &ne; Deadlock
           </button>
 
           <button
             onClick={() => loadPreset(selectedPreset)}
-            className="p-2 rounded-xl bg-slate-900/80 hover:bg-slate-800 text-slate-300 border border-slate-700 text-xs cursor-pointer transition-all"
+            className="p-1.5 rounded-md bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white border border-slate-700 text-xs cursor-pointer transition-colors shadow-2xs"
             title="Reset Scenario State"
           >
-            <RotateCcw className="w-3.5 h-3.5" />
+            <RotateCcw className="w-4 h-4" />
           </button>
         </div>
       </div>
 
-      {/* Mandatory Rule 8 Warning Banner for Multi-instance vs Single-instance */}
-      {!isSingleInstance && (
-        <div className="p-4 rounded-xl bg-amber-950/70 border-2 border-amber-500/80 text-amber-200 text-xs flex items-start gap-3.5 shadow-lg">
-          <AlertTriangle className="w-5 h-5 text-amber-400 shrink-0 mt-0.5 animate-pulse" />
-          <div className="space-y-1">
-            <span className="font-mono font-black text-amber-300 block text-sm tracking-wide">
-              OS THEOREM WARNING: Multi-Instance Resource Graphs
-            </span>
-            <p className="text-amber-200 leading-relaxed font-sans">
-              &ldquo;A cycle in a resource-allocation graph is <strong>NOT by itself conclusive</strong> for multiple-instance resources.&rdquo;
-              A cycle is a <em>necessary</em> condition for deadlock in multi-instance systems, but only <em>sufficient</em> if resources are strictly single-instance.
-              Deadlock in multi-instance systems is verified solely by running the <strong>Allocation-Request-Available reduction algorithm</strong>.
-            </p>
-          </div>
-        </div>
-      )}
-
-      {/* Detection Status Alert Banner */}
+      {/* 2. High-Density Status & Recovery Header */}
       <div
-        className={`p-4 sm:p-5 rounded-2xl border flex flex-col md:flex-row items-start md:items-center justify-between gap-4 shadow-xl ${
+        className={`p-3.5 rounded-xl border flex flex-col md:flex-row items-start md:items-center justify-between gap-3 shadow-2xs ${
           detectionResult.hasDeadlock
-            ? 'cockpit-glass border-red-500/80 text-red-200 shadow-[0_0_25px_rgba(239,68,68,0.25)]'
-            : 'cockpit-glass border-emerald-500/80 text-emerald-200 shadow-[0_0_25px_rgba(16,185,129,0.25)]'
+            ? 'bg-rose-50/90 border-rose-300 text-rose-950'
+            : 'bg-emerald-50/90 border-emerald-300 text-emerald-950'
         }`}
       >
-        <div className="flex items-center gap-3.5">
-          <StatusBadge status={detectionResult.status} size="lg" />
+        <div className="flex items-center gap-3">
+          <StatusBadge status={detectionResult.status} size="sm" />
           <div>
-            <h4 className="text-sm sm:text-base font-black tracking-wide font-mono uppercase">
-              {detectionResult.hasDeadlock ? 'Deadlocked Processes Identified' : 'Zero Deadlocks In System'}
+            <h4 className="text-sm font-extrabold tracking-tight font-sans text-slate-900">
+              {detectionResult.hasDeadlock ? 'Circular Deadlock Detected in System' : 'Zero Deadlocks In System (All Processes Can Terminate)'}
             </h4>
-            <p className="text-xs text-slate-300 font-sans mt-0.5">
+            <p className="text-xs text-slate-700 font-sans">
               {detectionResult.explanation}
             </p>
           </div>
         </div>
 
         {detectionResult.hasDeadlock && (
-          <div className="flex items-center gap-2 bg-red-950/90 px-3.5 py-2 rounded-xl border border-red-500/60 text-xs font-mono font-bold text-red-300 shadow-[0_0_12px_rgba(239,68,68,0.3)]">
-            <Lock className="w-4 h-4 text-red-400 animate-pulse" />
-            <span>Deadlocked Set: &#123;{detectionResult.deadlockedProcessNames.join(', ')}&#125;</span>
+          <div className="flex items-center gap-2 bg-white px-3 py-1.5 rounded-md border border-rose-300 text-xs font-mono font-bold text-rose-900 shadow-2xs">
+            <Lock className="w-4 h-4 text-rose-600" />
+            <span>Deadlocked: &#123;{detectionResult.deadlockedProcessNames.join(', ')}&#125;</span>
           </div>
         )}
       </div>
 
-      {/* Graph and Matrix Split View */}
-      <div className="grid grid-cols-1 lg:grid-cols-12 gap-5">
+      {/* 3. 2-Column Split: Interactive RAG Graph View (7 cols) + Matrix & Trace (5 cols) */}
+      <div className="grid grid-cols-1 lg:grid-cols-12 gap-3.5 items-start">
         {/* Left: Resource Allocation Graph View */}
-        <div className="lg:col-span-7 space-y-3">
-          <div className="flex items-center justify-between px-1">
-            <h4 className="text-xs font-bold text-slate-200 uppercase tracking-wider flex items-center gap-2 font-mono">
-              <GitBranch className="w-4 h-4 text-cyan-400" />
-              Interactive Resource Allocation Graph (RAG)
-            </h4>
-            <span className="text-[11px] font-mono text-cyan-400">
-              {isSingleInstance ? 'Wait-For Graph Cycle Detection' : 'Multi-instance Node Topology'}
+        <div className="lg:col-span-7 bg-white rounded-xl border border-slate-200 shadow-2xs overflow-hidden">
+          <div className="bg-slate-900 px-4 py-3 border-b border-slate-800 flex items-center justify-between">
+            <div className="flex items-center gap-2.5">
+              <GitBranch className="w-4 h-4 text-indigo-400" />
+              <h4 className="text-sm font-extrabold text-white font-sans tracking-tight">
+                Interactive Resource Allocation Graph (RAG)
+              </h4>
+            </div>
+            <span className="text-xs font-mono font-bold text-slate-400">
+              {isSingleInstance ? 'Wait-For Graph (WFG) Topology' : 'Multi-instance bipartite graph'}
             </span>
           </div>
 
-          <RAGGraphView
-            graph={ragGraph}
-            hasDeadlock={detectionResult.hasDeadlock}
-            deadlockedProcessNames={detectionResult.deadlockedProcessNames}
-            terminatedProcessId={terminatedProcessId}
-          />
+          <div className="p-3.5">
+            <RAGGraphView
+              graph={ragGraph}
+              hasDeadlock={detectionResult.hasDeadlock}
+              deadlockedProcessNames={detectionResult.deadlockedProcessNames}
+              terminatedProcessId={terminatedProcessId}
+              isSingleInstance={isSingleInstance}
+            />
+          </div>
         </div>
 
-        {/* Right: Matrices and Multi-instance Algorithm Step Trace */}
-        <div className="lg:col-span-5 space-y-4">
-          {/* Current Matrices: Allocation & Request */}
-          <div className="cockpit-glass rounded-2xl p-4 shadow-xl border border-cyan-500/20 space-y-3">
-            <div className="flex items-center justify-between border-b border-slate-800 pb-2">
-              <span className="text-xs font-bold text-slate-200 uppercase tracking-wider font-mono">
-                Detection Matrices (Alloc vs Request)
+        {/* Right: Detection Matrices & Multi-instance Resolution Trace */}
+        <div className="lg:col-span-5 space-y-3.5">
+          {/* Allocation & Request Matrices */}
+          <div className="bg-white rounded-xl border border-slate-200 shadow-2xs overflow-hidden">
+            <div className="bg-slate-900 px-4 py-3 border-b border-slate-800 flex items-center justify-between">
+              <span className="text-sm font-extrabold text-white font-sans tracking-tight">
+                Detection Matrices (Alloc vs. Request)
               </span>
-              <span className="text-[11px] font-mono text-cyan-300 font-bold">
-                Available: [{available.join(', ')}]
+              <span className="text-xs font-mono text-indigo-300 font-bold bg-slate-800 px-2.5 py-1 rounded-md border border-slate-700">
+                Avail: [{available.join(', ')}]
               </span>
             </div>
 
-            <div className="overflow-x-auto">
-              <table className="w-full text-xs text-center border-collapse">
-                <thead>
-                  <tr className="border-b border-slate-800 text-slate-400 font-mono text-[11px]">
-                    <th className="py-1 px-2 text-left">Process</th>
-                    <th className="py-1 px-2 text-blue-400 font-semibold">Allocation</th>
-                    <th className="py-1 px-2 text-amber-400 font-semibold">Request</th>
-                    <th className="py-1 px-2 text-slate-400">Finish[]</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {processNames.map((pName, i) => {
-                    const isDead = detectionResult.deadlockedProcessNames.includes(pName);
-                    const isTerm = terminatedProcessId === i;
-                    const fin = detectionResult.finishArray[i];
+            <div className="p-3">
+              <div className="overflow-x-auto">
+                <table className="w-full text-xs text-center border-collapse">
+                  <thead>
+                    <tr className="border-b border-slate-200 text-slate-700 font-mono text-xs bg-slate-100">
+                      <th className="py-2 px-3 text-left font-sans font-bold">Process</th>
+                      <th className="py-2 px-3 text-blue-900 font-bold">Alloc</th>
+                      <th className="py-2 px-3 text-amber-900 font-bold">Request</th>
+                      <th className="py-2 px-3 text-slate-800 font-bold">Finish[]</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100 font-mono text-xs">
+                    {processNames.map((pName, i) => {
+                      const isDead = detectionResult.deadlockedProcessNames.includes(pName);
+                      const isTerm = terminatedProcessId === i;
+                      const fin = detectionResult.finishArray[i];
 
-                    return (
-                      <tr
-                        key={i}
-                        className={`border-b border-slate-900/60 font-mono ${
-                          isTerm
-                            ? 'opacity-30 line-through'
-                            : isDead
-                            ? 'bg-red-950/40 text-red-300'
-                            : 'hover:bg-slate-900/50'
-                        }`}
-                      >
-                        <td className="py-2 px-2 text-left font-bold text-slate-200">
-                          {pName}
-                        </td>
-                        <td className="py-2 px-2 text-blue-300">
-                          [{allocation[i].join(', ')}]
-                        </td>
-                        <td className="py-2 px-2 text-amber-300">
-                          [{request[i].join(', ')}]
-                        </td>
-                        <td className="py-2 px-2">
-                          <span
-                            className={`px-2 py-0.5 rounded text-[10px] font-bold ${
-                              fin
-                                ? 'bg-emerald-950/80 text-emerald-400 border border-emerald-500/40'
-                                : 'bg-red-950/80 text-red-400 border border-red-500/40'
-                            }`}
-                          >
-                            {fin ? 'TRUE' : 'FALSE'}
-                          </span>
-                        </td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
-            </div>
-          </div>
-
-          {/* Algorithm Work Trace Pipeline */}
-          <div className="cockpit-glass rounded-2xl p-4 shadow-xl border border-cyan-500/20 space-y-2">
-            <h5 className="text-xs font-bold text-slate-200 uppercase tracking-wider flex items-center justify-between font-mono">
-              <span>Detection Algorithm Resolution Trace</span>
-              <span className="text-[10px] text-cyan-400">
-                {detectionResult.steps.length} Steps Completed
-              </span>
-            </h5>
-
-            {detectionResult.steps.length === 0 ? (
-              <p className="text-xs text-slate-400 italic py-2 font-mono">
-                No process could satisfy Request &le; Work. System immediately blocked at start.
-              </p>
-            ) : (
-              <div className="space-y-1.5 max-h-48 overflow-y-auto pr-1">
-                {detectionResult.steps.map((st) => (
-                  <div
-                    key={st.stepIndex}
-                    className="p-2 rounded-xl bg-slate-950/80 border border-slate-800 text-[11px] font-mono text-slate-300"
-                  >
-                    <div className="flex items-center justify-between text-emerald-400 font-bold mb-0.5">
-                      <span>Step {st.stepIndex}: {st.processName} completes</span>
-                      <span>Work &rarr; [{st.workAfter.join(', ')}]</span>
-                    </div>
-                    <p className="text-[10px] text-slate-400 font-sans">{st.reason}</p>
-                  </div>
-                ))}
+                      return (
+                        <tr
+                          key={i}
+                          className={`transition-colors ${
+                            isTerm
+                              ? 'opacity-30 line-through bg-slate-100'
+                              : isDead
+                              ? 'bg-rose-50 text-rose-900 font-semibold'
+                              : fin
+                              ? 'bg-emerald-50/50 text-emerald-950'
+                              : 'hover:bg-slate-50/80'
+                          }`}
+                        >
+                          <td className="py-2 px-3 text-left font-bold text-slate-900 text-sm">
+                            {pName}
+                          </td>
+                          <td className="py-2 px-3 text-blue-900 font-bold text-sm">
+                            [{allocation[i].join(', ')}]
+                          </td>
+                          <td className="py-2 px-3 text-amber-900 font-bold text-sm">
+                            [{request[i].join(', ')}]
+                          </td>
+                          <td className="py-2 px-3">
+                            <span
+                              className={`px-2 py-0.5 rounded text-xs font-bold ${
+                                fin
+                                  ? 'bg-emerald-100 text-emerald-900 border border-emerald-300'
+                                  : 'bg-rose-100 text-rose-900 border border-rose-300'
+                              }`}
+                            >
+                              {fin ? 'TRUE' : 'FALSE'}
+                            </span>
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
               </div>
-            )}
-          </div>
-        </div>
-      </div>
-
-      {/* Recovery Demo Section (Rule 9) */}
-      <div className="cockpit-glass rounded-2xl p-5 sm:p-6 shadow-xl border border-cyan-500/20 space-y-4">
-        <div className="flex items-center justify-between border-b border-slate-800 pb-3">
-          <div className="flex items-center gap-3">
-            <div className="p-2 rounded-xl bg-red-500/15 text-red-400 border border-red-500/30 shadow-[0_0_10px_rgba(239,68,68,0.2)]">
-              <Skull className="w-4 h-4" />
-            </div>
-            <div>
-              <h4 className="text-sm sm:text-base font-bold text-slate-100 font-mono tracking-tight">
-                Deadlock Recovery Engine (Victim Selection &amp; Resource Preemption)
-              </h4>
-              <p className="text-xs text-slate-400 font-mono mt-0.5">
-                Terminate a deadlocked process to reclaim its allocated resources and unblock remaining processes.
-              </p>
             </div>
           </div>
-        </div>
 
-        {/* Action Controls */}
-        <div className="flex flex-wrap items-center gap-3">
-          <span className="text-xs font-semibold text-slate-300 font-mono">
-            Terminate Victim Process:
-          </span>
-
-          {processNames.map((pName, idx) => {
-            const isDeadlocked = detectionResult.deadlockedProcessNames.includes(pName);
-            const isTerminated = terminatedProcessId === idx;
-
-            return (
-              <button
-                key={pName}
-                onClick={() => handleTerminate(idx)}
-                disabled={isTerminated || !isDeadlocked}
-                className={`px-3 py-1.5 rounded-xl text-xs font-mono font-bold flex items-center gap-1.5 transition-all cursor-pointer ${
-                  isTerminated
-                    ? 'bg-slate-950 text-slate-600 border border-slate-800 cursor-not-allowed'
-                    : isDeadlocked
-                    ? 'bg-red-900/50 hover:bg-red-800/80 text-red-200 border border-red-500/60 hover:shadow-[0_0_12px_rgba(239,68,68,0.4)]'
-                    : 'bg-slate-900 text-slate-600 border border-slate-800 cursor-not-allowed opacity-40'
-                }`}
-              >
-                <Skull className="w-3.5 h-3.5 text-red-400" />
-                <span>Terminate {pName}</span>
-              </button>
-            );
-          })}
-
-          {terminatedProcessId !== null && (
-            <button
-              onClick={() => loadPreset(selectedPreset)}
-              className="ml-auto px-3.5 py-1.5 rounded-xl bg-slate-850 hover:bg-slate-800 text-cyan-300 border border-cyan-500/30 text-xs font-mono font-medium flex items-center gap-1.5 cursor-pointer transition-all"
-            >
-              <RotateCcw className="w-3.5 h-3.5" />
-              <span>Reset Scenario State</span>
-            </button>
-          )}
-        </div>
-
-        {/* Recovery Execution Feedback Log */}
-        {recoveryLog && (
-          <div className="p-4 rounded-xl bg-emerald-950/70 border border-emerald-500/60 text-emerald-200 text-xs space-y-1 animate-in fade-in duration-300 shadow-lg">
-            <div className="font-bold text-emerald-300 flex items-center gap-2 font-mono">
-              <CheckCircle2 className="w-4 h-4 text-emerald-400" />
-              <span>Recovery Action Outcome:</span>
+          {/* Algorithm Work Trace Pipeline (Requirement 3: Detailed Explanation) */}
+          <div className="bg-white rounded-xl border border-slate-200 shadow-2xs overflow-hidden">
+            <div className="bg-slate-900 px-4 py-3 border-b border-slate-800 flex items-center justify-between">
+              <h5 className="text-sm font-extrabold text-white font-sans tracking-tight">
+                Matrix Reduction Algorithm Trace
+              </h5>
+              <span className="text-xs text-slate-400 font-mono font-bold">
+                Initial Work = [{available.join(', ')}]
+              </span>
             </div>
-            <p className="text-slate-200 font-mono text-[11px] leading-relaxed">
-              {recoveryLog}
-            </p>
+
+            <div className="p-3.5 space-y-3">
+              {/* Completed Reduction Steps */}
+              {detectionResult.steps.length > 0 ? (
+                <div className="space-y-2">
+                  {detectionResult.steps.map((st) => (
+                    <div
+                      key={st.stepIndex}
+                      className="p-2.5 rounded-lg bg-emerald-50 border border-emerald-300 text-xs font-mono text-emerald-950 space-y-1"
+                    >
+                      <div className="flex items-center justify-between font-bold">
+                        <span className="text-sm">Step {st.stepIndex}: {st.processName} Request [{st.request.join(',')}] &le; Work [{st.workBefore.join(',')}]</span>
+                        <span className="text-xs bg-white px-2 py-0.5 rounded border border-emerald-300 text-emerald-950 font-bold">
+                          Work &rarr; [{st.workAfter.join(', ')}]
+                        </span>
+                      </div>
+                      <p className="text-xs text-emerald-900 font-sans">
+                        {st.processName} completes immediately and releases Allocation [{st.allocation.join(', ')}] back into temporary Work.
+                      </p>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <p className="text-xs text-slate-600 italic py-1 font-sans">
+                  Work initialized to Available [{available.join(', ')}]. No process can satisfy Request &le; Work.
+                </p>
+              )}
+
+              {/* Reduction Halted / Deadlock Proof Card */}
+              {detectionResult.hasDeadlock && reductionDeficits && (
+                <div className="p-3 rounded-lg bg-rose-50 border border-rose-300 text-xs space-y-2 font-sans">
+                  <div className="flex items-center justify-between">
+                    <span className="font-bold text-rose-950 text-xs flex items-center gap-1.5">
+                      <AlertTriangle className="w-4 h-4 text-rose-600" />
+                      <span>Reduction Halted &bull; Deadlock Verified</span>
+                    </span>
+                    <span className="font-mono text-xs bg-white px-2 py-0.5 rounded border border-rose-300 text-rose-900 font-bold">
+                      Work Halted = [{reductionDeficits.finalWork.join(', ')}]
+                    </span>
+                  </div>
+
+                  <p className="text-xs text-rose-900 leading-normal">
+                    With Work vector halted at [{reductionDeficits.finalWork.join(', ')}], no remaining process can satisfy its pending request:
+                  </p>
+
+                  <div className="space-y-1 font-mono text-xs">
+                    {reductionDeficits.blockedList.map((bp) => (
+                      <div key={bp.processId} className="p-1.5 rounded bg-white border border-rose-200 text-slate-800">
+                        <span className="font-bold text-rose-900">{bp.processName}</span>{' '}
+                        Request [{bp.request.join(',')}] &gt; Work [{reductionDeficits.finalWork.join(',')}]:{' '}
+                        <span className="text-rose-700 font-semibold">{bp.deficits.join('; ')}</span>
+                      </div>
+                    ))}
+                  </div>
+
+                  <div className="pt-1.5 text-xs text-rose-950 font-semibold border-t border-rose-200/80 flex items-center justify-between">
+                    <span>Finish: [{detectionResult.finishArray.map((f, i) => `${processNames[i]}:${f ? 'T' : 'F'}`).join(', ')}]</span>
+                    <span className="font-mono text-rose-800 font-bold">&rArr; Deadlocked &#123;{detectionResult.deadlockedProcessNames.join(', ')}&#125;</span>
+                  </div>
+                </div>
+              )}
+
+              {!detectionResult.hasDeadlock && (
+                <div className="p-3 rounded-lg bg-emerald-50 border border-emerald-300 text-xs text-emerald-950 font-sans flex items-center gap-2.5">
+                  <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
+                  <span className="font-medium">
+                    All processes satisfied Request &le; Work. Final Work = [{detectionResult.finalWork.join(', ')}]. Zero deadlocks exist.
+                  </span>
+                </div>
+              )}
+            </div>
           </div>
-        )}
+
+          {/* Deadlock Recovery Deck (Victim Selection & Resource Preemption - Requirement 4) */}
+          <div className="bg-white rounded-xl border border-slate-200 shadow-2xs overflow-hidden">
+            <div className="bg-slate-900 px-4 py-3 border-b border-slate-800 flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <Skull className="w-4 h-4 text-rose-400" />
+                <h4 className="text-sm font-extrabold text-white font-sans tracking-tight">
+                  Deadlock Recovery: Victim Preemption
+                </h4>
+              </div>
+              <span className="text-xs text-slate-400 font-sans">
+                Select eligible victim to reclaim allocation
+              </span>
+            </div>
+
+            <div className="p-3.5 space-y-3">
+              {/* Action Buttons: P0 disabled because already finished; eligible victims show allocation */}
+              <div className="flex flex-wrap items-center gap-2">
+                {processNames.map((pName, idx) => {
+                  const isFinished = detectionResult.finishArray[idx] === true;
+                  const isDeadlocked = detectionResult.deadlockedProcessNames.includes(pName);
+                  const isTerminated = terminatedProcessId === idx;
+                  const allocStr = allocation[idx].join(',');
+
+                  if (isFinished && !isTerminated) {
+                    return (
+                      <div
+                        key={pName}
+                        className="px-2.5 py-1.5 rounded-md bg-slate-100 text-slate-500 border border-slate-200 text-xs font-sans font-medium flex items-center gap-1.5 cursor-not-allowed opacity-80"
+                        title={`${pName} has already finished (not an eligible victim)`}
+                      >
+                        <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" />
+                        <span>{pName}: Finished</span>
+                      </div>
+                    );
+                  }
+
+                  return (
+                    <button
+                      key={pName}
+                      onClick={() => handleTerminate(idx)}
+                      disabled={isTerminated || !isDeadlocked || isTerminatingAnimation}
+                      className={`px-3 py-1.5 rounded-md text-xs font-sans font-bold flex items-center gap-2 transition-colors cursor-pointer shadow-2xs ${
+                        isTerminated
+                          ? 'bg-slate-100 text-slate-400 border border-slate-200 cursor-not-allowed line-through'
+                          : isDeadlocked
+                          ? 'bg-rose-50 hover:bg-rose-100 text-rose-900 border border-rose-300'
+                          : 'bg-slate-50 text-slate-400 border border-slate-200 cursor-not-allowed opacity-50'
+                      }`}
+                      title={isDeadlocked ? `Terminate ${pName} to reclaim Allocation [${allocStr}]` : undefined}
+                    >
+                      <Skull className="w-3.5 h-3.5 text-rose-600" />
+                      <span>Terminate {pName}</span>
+                      <span className="font-mono text-xs bg-white px-2 py-0.5 rounded border border-rose-200 text-rose-800 font-black">
+                        +[{allocStr}]
+                      </span>
+                    </button>
+                  );
+                })}
+
+                {terminatedProcessId !== null && (
+                  <button
+                    onClick={() => loadPreset(selectedPreset)}
+                    className="ml-auto px-3 py-1.5 rounded-md bg-white hover:bg-slate-50 text-slate-800 border border-slate-300 text-xs font-sans font-bold flex items-center gap-1.5 cursor-pointer transition-colors shadow-2xs"
+                    title="Reset scenario to original matrices and graph"
+                  >
+                    <RotateCcw className="w-3.5 h-3.5" />
+                    <span>Reset Scenario</span>
+                  </button>
+                )}
+              </div>
+
+              {/* Recovery Outcome Log Message */}
+              {recoveryOutcome && (
+                <div
+                  className={`p-3 rounded-lg border text-xs space-y-1.5 animate-in fade-in duration-200 font-sans ${
+                    recoveryOutcome.isResolved
+                      ? 'bg-emerald-50 border-emerald-300 text-emerald-950'
+                      : 'bg-amber-50 border-amber-300 text-amber-950'
+                  }`}
+                >
+                  <div className="font-bold flex items-center justify-between text-xs">
+                    <div className="flex items-center gap-2">
+                      {recoveryOutcome.isResolved ? (
+                        <CheckCircle2 className="w-4 h-4 text-emerald-600" />
+                      ) : (
+                        <AlertTriangle className="w-4 h-4 text-amber-600" />
+                      )}
+                      <span className="text-sm font-extrabold">
+                        {recoveryOutcome.isResolved ? 'DEADLOCK RESOLVED' : 'DEADLOCK PERSISTS AFTER TERMINATION'}
+                      </span>
+                    </div>
+                    <span className="font-mono text-xs bg-white px-2 py-0.5 rounded border border-slate-300 font-bold">
+                      New Available: [{recoveryOutcome.newAvailable.join(', ')}]
+                    </span>
+                  </div>
+
+                  <p className="text-xs leading-normal font-sans text-slate-800">
+                    Terminated <strong className="font-mono text-rose-900">{recoveryOutcome.procName}</strong> and reclaimed{' '}
+                    <span className="font-mono font-bold text-blue-900">[{recoveryOutcome.releasedStr}]</span> back into Available pool.
+                  </p>
+
+                  {recoveryOutcome.isResolved ? (
+                    <p className="text-xs font-bold text-emerald-900 font-sans">
+                      All remaining processes can now satisfy their requests in sequence:{' '}
+                      <span className="font-mono text-emerald-950">&lt;{recoveryOutcome.resolvedOrder?.join(' → ')}&gt;</span>.
+                    </p>
+                  ) : (
+                    <p className="text-xs font-bold text-amber-900 font-sans">
+                      Insufficient resources reclaimed. Processes{' '}
+                      <span className="font-mono text-rose-800">&#123;{recoveryOutcome.remainingBlocked.join(', ')}&#125;</span> remain blocked.
+                    </p>
+                  )}
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
       </div>
     </div>
   );

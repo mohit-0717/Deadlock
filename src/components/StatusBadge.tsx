@@ -18,53 +18,53 @@ export const STATUS_CONFIG: Record<
     bgClass: string;
     borderClass: string;
     textClass: string;
-    ringClass: string;
+    dotClass: string;
   }
 > = {
   SAFE: {
-    label: 'SAFE',
-    description: 'A complete safe sequence exists; deadlock cannot occur under any order of claims.',
+    label: 'Safe State',
+    description: 'System invariant satisfied: verified safe execution sequence exists.',
     icon: ShieldCheck,
-    bgClass: 'bg-emerald-500/15 dark:bg-emerald-500/20',
-    borderClass: 'border-emerald-500/50',
-    textClass: 'text-emerald-400 font-bold',
-    ringClass: 'ring-1 ring-emerald-500/30 shadow-[0_0_12px_rgba(16,185,129,0.25)]',
+    bgClass: 'bg-emerald-50',
+    borderClass: 'border-emerald-200',
+    textClass: 'text-emerald-800',
+    dotClass: 'bg-emerald-600',
   },
   UNSAFE: {
-    label: 'UNSAFE',
-    description: 'No safe sequence exists. Warning: this is NOT deadlock yet, but deadlock cannot be prevented if all processes make peak demands.',
+    label: 'Unsafe State',
+    description: 'Trial allocation cannot guarantee completion. Rollback triggered.',
     icon: ShieldAlert,
-    bgClass: 'bg-amber-500/15 dark:bg-amber-500/20',
-    borderClass: 'border-amber-500/50',
-    textClass: 'text-amber-400 font-bold',
-    ringClass: 'ring-1 ring-amber-500/30 shadow-[0_0_12px_rgba(245,158,11,0.25)]',
+    bgClass: 'bg-rose-50',
+    borderClass: 'border-rose-200',
+    textClass: 'text-rose-800',
+    dotClass: 'bg-rose-600 animate-pulse',
   },
   WAITING: {
-    label: 'WAITING / DEFERRED',
-    description: 'Request ≤ Need but > Available. Request queued legitimately until resources are released; state completely unchanged.',
+    label: 'Waiting (Queued)',
+    description: 'Request is within Need but exceeds Available. State preserved.',
     icon: Clock,
-    bgClass: 'bg-yellow-500/15 dark:bg-yellow-500/20',
-    borderClass: 'border-yellow-500/50',
-    textClass: 'text-yellow-400 font-bold',
-    ringClass: 'ring-1 ring-yellow-500/30 shadow-[0_0_12px_rgba(234,179,8,0.25)]',
+    bgClass: 'bg-amber-50',
+    borderClass: 'border-amber-200',
+    textClass: 'text-amber-800',
+    dotClass: 'bg-amber-600',
   },
   DEADLOCK_DETECTED: {
-    label: 'DEADLOCK DETECTED',
-    description: 'Produced ONLY by Detection Algorithm: active circular wait / deadlock exists right now where processes are permanently blocked.',
+    label: 'Deadlock Detected',
+    description: 'Circular wait confirmed in Wait-For Graph. Preemption required.',
     icon: Lock,
-    bgClass: 'bg-red-500/20 dark:bg-red-500/25',
-    borderClass: 'border-red-500/60',
-    textClass: 'text-red-400 font-extrabold',
-    ringClass: 'ring-1 ring-red-500/40 shadow-[0_0_16px_rgba(239,68,68,0.35)]',
+    bgClass: 'bg-rose-50',
+    borderClass: 'border-rose-300',
+    textClass: 'text-rose-900',
+    dotClass: 'bg-rose-600 animate-ping',
   },
   INVALID_INPUT: {
-    label: 'INVALID INPUT',
-    description: 'Input violates OS integrity constraints (negative values, non-existent process, or request exceeding declared maximum claim).',
+    label: 'Invalid Input',
+    description: 'Request violates format, bounds, or declared maximum claim.',
     icon: AlertCircle,
-    bgClass: 'bg-slate-500/15 dark:bg-slate-500/20',
-    borderClass: 'border-slate-500/50',
-    textClass: 'text-slate-300 font-bold',
-    ringClass: 'ring-1 ring-slate-500/30',
+    bgClass: 'bg-slate-100',
+    borderClass: 'border-slate-200',
+    textClass: 'text-slate-800',
+    dotClass: 'bg-slate-500',
   },
 };
 
@@ -80,28 +80,29 @@ export const StatusBadge: React.FC<StatusBadgeProps> = ({
 
   const sizeClasses = {
     sm: 'text-xs px-2.5 py-1 gap-1.5',
-    md: 'text-sm px-3.5 py-1.5 gap-2',
-    lg: 'text-base px-4 py-2 gap-2.5',
+    md: 'text-xs px-3 py-1.5 gap-2',
+    lg: 'text-sm px-3.5 py-1.5 gap-2',
   };
 
   const iconSizes = {
     sm: 'w-3.5 h-3.5',
     md: 'w-4 h-4',
-    lg: 'w-5 h-5',
+    lg: 'w-4 h-4',
   };
 
   return (
     <div className="inline-flex flex-col">
       <div
-        className={`inline-flex items-center rounded-full border ${config.bgClass} ${config.borderClass} ${config.textClass} ${config.ringClass} ${sizeClasses[size]} transition-all duration-300`}
+        className={`inline-flex items-center rounded-lg border font-sans font-semibold shadow-2xs ${config.bgClass} ${config.borderClass} ${config.textClass} ${sizeClasses[size]} transition-colors`}
         role="status"
         aria-label={`System Status: ${textToDisplay}`}
       >
+        <span className={`w-2 h-2 rounded-full shrink-0 ${config.dotClass}`} />
         <Icon className={`${iconSizes[size]} shrink-0`} />
-        <span>{textToDisplay}</span>
+        <span className="tracking-tight">{textToDisplay}</span>
       </div>
       {showDescription && (
-        <p className="mt-1 text-xs text-slate-400 max-w-xs">{config.description}</p>
+        <p className="mt-1 text-xs text-slate-500 max-w-xs font-sans">{config.description}</p>
       )}
     </div>
   );

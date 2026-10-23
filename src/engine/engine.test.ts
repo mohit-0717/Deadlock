@@ -46,22 +46,68 @@ test('Banker Request: Scenario B (Request exceeds Available) yields WAITING', ()
   assert.deepEqual(res.newState.available, [3, 3, 2]); // completely unchanged
 });
 
-test('Banker Request: Scenario C (P1 grants, P0 causes Unsafe -> Denied & Rollback)', () => {
+test('Banker Request: P1 request [1,0,2] is GRANTED and leaves Available [2,3,0] in safe state', () => {
   const base = getScenarioA();
-  // Step 1: P1 requests [1, 0, 2]
-  const step1 = requestResource(1, [1, 0, 2], base);
-  assert.equal(step1.status, 'SAFE');
-  assert.equal(step1.granted, true);
-  assert.deepEqual(step1.newState.available, [2, 3, 0]);
+  const res = requestResource(1, [1, 0, 2], base);
 
-  // Step 2: P0 requests [0, 2, 0]
-  const step2 = requestResource(0, [0, 2, 0], step1.newState);
-  assert.equal(step2.status, 'UNSAFE');
-  assert.equal(step2.granted, false);
-  assert.equal(step2.rollbackPerformed, true);
-  // Ensure state rolled back to before P0's request
-  assert.deepEqual(step2.newState.available, [2, 3, 0]);
-  assert.deepEqual(step2.newState.allocation[0], [0, 1, 0]);
+  assert.equal(res.status, 'SAFE');
+  assert.equal(res.granted, true);
+  assert.equal(res.rollbackPerformed, false);
+  assert.deepEqual(res.newState.available, [2, 3, 0]);
+  assert.deepEqual(res.newState.allocation[1], [3, 0, 2]);
+  assert.deepEqual(res.newState.need[1], [0, 2, 0]);
+});
+
+test('Banker Request: P0 request [2,0,0] is SAFE and GRANTED (Available becomes [1,3,2])', () => {
+  const base = getScenarioA();
+  const res = requestResource(0, [2, 0, 0], base);
+
+  assert.equal(res.status, 'SAFE');
+  assert.equal(res.granted, true);
+  assert.equal(res.rollbackPerformed, false);
+  assert.deepEqual(res.newState.available, [1, 3, 2]);
+  assert.deepEqual(res.newState.allocation[0], [2, 1, 0]);
+  assert.deepEqual(res.newState.need[0], [5, 4, 3]);
+  assert.ok(res.safetyResult?.isSafe, 'Resulting state must have a valid safe sequence');
+});
+
+test('Banker Request: Scenario C - P0 request [0,0,2] is UNSAFE and triggers atomic ROLLBACK', () => {
+  const base = getScenarioA();
+  const res = requestResource(0, [0, 0, 2], base);
+
+  assert.equal(res.status, 'UNSAFE');
+  assert.equal(res.granted, false);
+  assert.equal(res.rollbackPerformed, true);
+  // Trial state had Available [3, 3, 0]
+  assert.deepEqual(res.trialState?.available, [3, 3, 0]);
+  // State was atomically restored to base state
+  assert.deepEqual(res.newState.available, [3, 3, 2]);
+  assert.deepEqual(res.newState.allocation[0], [0, 1, 0]);
+  assert.deepEqual(res.newState.need[0], [7, 4, 3]);
+});
+
+test('Banker Request: Negative values, non-integers, and wrong dimensions are rejected', () => {
+  const base = getScenarioA();
+
+  // Negative value
+  const negRes = requestResource(0, [-1, 0, 0], base);
+  assert.equal(negRes.status, 'INVALID_INPUT');
+  assert.equal(negRes.granted, false);
+
+  // Non-integer
+  const floatRes = requestResource(0, [1.5, 0, 0], base);
+  assert.equal(floatRes.status, 'INVALID_INPUT');
+  assert.equal(floatRes.granted, false);
+
+  // Wrong dimension (2 items instead of 3)
+  const dimRes = requestResource(0, [1, 0], base);
+  assert.equal(dimRes.status, 'INVALID_INPUT');
+  assert.equal(dimRes.granted, false);
+
+  // Invalid process ID
+  const procRes = requestResource(99, [1, 0, 0], base);
+  assert.equal(procRes.status, 'INVALID_INPUT');
+  assert.equal(procRes.granted, false);
 });
 
 test('Deadlock Detection: Scenario D1 (Single-instance cycle produces DEADLOCK)', () => {
@@ -149,6 +195,359 @@ test('Validation: Request exceeding Need is rejected', () => {
   const req = requestResource(0, [8, 0, 0], base);
   assert.equal(req.status, 'INVALID_INPUT');
   assert.equal(req.ruleCode, 'b_exceeds_need');
+  assert.equal(req.granted, false);
+  assert.deepEqual(req.newState.available, [3, 3, 2]);
+});
+
+// ============================================================================
+// AUTOMATED REGRESSION SUITE: DEADLOCKLAB BANKER'S ALGORITHM
+// ============================================================================
+
+test('Regression #3: Scenario A Baseline and Safe Sequence Verification', () => {
+  const base = getScenarioA();
+
+  // Available starts strictly at [3, 3, 2]
+  assert.deepEqual(base.available, [3, 3, 2]);
+
+  // Mathematical correctness: Need = Max - Allocation for all processes
+  for (let i = 0; i < base.processCount; i++) {
+    for (let j = 0; j < base.resourceCount; j++) {
+      assert.equal(
+        base.need[i][j],
+        base.max[i][j] - base.allocation[i][j],
+        `Need matrix invariant failed for P${i}, resource ${j}`
+      );
+    }
+  }
+
+  // Pure Dijkstra Banker's safety check
+  const safety = safetyCheck(base.allocation, base.max, base.available, base.need);
+  assert.equal(safety.isSafe, true);
+  assert.equal(safety.status, 'SAFE');
+  assert.deepEqual(safety.safeSequence, [1, 3, 4, 0, 2]);
+  assert.deepEqual(safety.safeSequenceNames, ['P1', 'P3', 'P4', 'P0', 'P2']);
+
+  // Dynamic process eligibility at initial Work [3, 3, 2]:
+  // P1 Need [1,2,2] <= [3,3,2] (Eligible)
+  // P3 Need [0,1,1] <= [3,3,2] (Eligible)
+  // P0 Need [7,4,3] > [3,3,2] (Waiting)
+  // P2 Need [6,0,0] > [3,3,2] (Waiting)
+  // P4 Need [4,3,1] > [3,3,2] (Waiting)
+  const isEligible = (pIdx: number, work: number[]) =>
+    base.need[pIdx].every((nd, idx) => nd <= work[idx]);
+
+  assert.equal(isEligible(1, base.available), true, 'P1 must be eligible initially');
+  assert.equal(isEligible(3, base.available), true, 'P3 must be eligible initially');
+  assert.equal(isEligible(0, base.available), false, 'P0 cannot run with initial Work');
+  assert.equal(isEligible(2, base.available), false, 'P2 cannot run with initial Work');
+  assert.equal(isEligible(4, base.available), false, 'P4 cannot run with initial Work');
+});
+
+test('Regression #4: Exact Work Vectors for All 5 Replay Steps', () => {
+  const base = getScenarioA();
+  const safety = safetyCheck(base.allocation, base.max, base.available, base.need);
+
+  assert.equal(safety.steps.length, 5);
+
+  // Step 1: P1 executes, Work: [3,3,2] + Alloc[2,0,0] -> [5,3,2]
+  assert.equal(safety.steps[0].processId, 1);
+  assert.equal(safety.steps[0].processName, 'P1');
+  assert.deepEqual(safety.steps[0].workBefore, [3, 3, 2]);
+  assert.deepEqual(safety.steps[0].allocation, [2, 0, 0]);
+  assert.deepEqual(safety.steps[0].workAfter, [5, 3, 2]);
+
+  // Step 2: P3 executes, Work: [5,3,2] + Alloc[2,1,1] -> [7,4,3]
+  assert.equal(safety.steps[1].processId, 3);
+  assert.equal(safety.steps[1].processName, 'P3');
+  assert.deepEqual(safety.steps[1].workBefore, [5, 3, 2]);
+  assert.deepEqual(safety.steps[1].allocation, [2, 1, 1]);
+  assert.deepEqual(safety.steps[1].workAfter, [7, 4, 3]);
+
+  // Step 3: P4 executes, Work: [7,4,3] + Alloc[0,0,2] -> [7,4,5]
+  assert.equal(safety.steps[2].processId, 4);
+  assert.equal(safety.steps[2].processName, 'P4');
+  assert.deepEqual(safety.steps[2].workBefore, [7, 4, 3]);
+  assert.deepEqual(safety.steps[2].allocation, [0, 0, 2]);
+  assert.deepEqual(safety.steps[2].workAfter, [7, 4, 5]);
+
+  // Step 4: P0 executes, Work: [7,4,5] + Alloc[0,1,0] -> [7,5,5]
+  assert.equal(safety.steps[3].processId, 0);
+  assert.equal(safety.steps[3].processName, 'P0');
+  assert.deepEqual(safety.steps[3].workBefore, [7, 4, 5]);
+  assert.deepEqual(safety.steps[3].allocation, [0, 1, 0]);
+  assert.deepEqual(safety.steps[3].workAfter, [7, 5, 5]);
+
+  // Step 5: P2 executes, Work: [7,5,5] + Alloc[3,0,2] -> [10,5,7]
+  assert.equal(safety.steps[4].processId, 2);
+  assert.equal(safety.steps[4].processName, 'P2');
+  assert.deepEqual(safety.steps[4].workBefore, [7, 5, 5]);
+  assert.deepEqual(safety.steps[4].allocation, [3, 0, 2]);
+  assert.deepEqual(safety.steps[4].workAfter, [10, 5, 7]);
+
+  // Final system Work vector must strictly equal total system capacity [10, 5, 7]
+  assert.deepEqual(safety.finalWork, [10, 5, 7]);
+});
+
+test('Regression #5: P0 Request [0,0,2] Unsafe Rejection & Atomic Rollback Audit', () => {
+  const base = getScenarioA();
+
+  // Baseline state snapshot before request
+  const initialAvailable = [...base.available];
+  const initialAlloc = base.allocation.map((r) => [...r]);
+  const initialNeed = base.need.map((r) => [...r]);
+
+  // P0 requests [0,0,2] -> Trial Available drops to [3,3,0]
+  const reqRes = requestResource(0, [0, 0, 2], base);
+
+  assert.equal(reqRes.status, 'UNSAFE');
+  assert.equal(reqRes.granted, false);
+  assert.equal(reqRes.rollbackPerformed, true);
+  assert.equal(reqRes.ruleCode, 'd_unsafe_denied');
+
+  // Verify tentative / trial state recorded unsafe Available [3, 3, 0]
+  assert.deepEqual(reqRes.trialState?.available, [3, 3, 0]);
+
+  // Verify atomic rollback restored base state completely (zero resource leak)
+  assert.deepEqual(reqRes.newState.available, initialAvailable);
+  assert.deepEqual(reqRes.newState.allocation, initialAlloc);
+  assert.deepEqual(reqRes.newState.need, initialNeed);
+
+  // Committed system state remains SAFE after rollback
+  const committedSafety = safetyCheck(
+    reqRes.newState.allocation,
+    reqRes.newState.max,
+    reqRes.newState.available,
+    reqRes.newState.need
+  );
+  assert.equal(committedSafety.isSafe, true);
+  assert.equal(committedSafety.status, 'SAFE');
+  assert.deepEqual(committedSafety.safeSequence, [1, 3, 4, 0, 2]);
+});
+
+test('Regression #6: Request Protocol Permutations (P1 Granted, P0 Deferred, P0 Exceeds Need)', () => {
+  const base = getScenarioA();
+
+  // 1. Safe & Granted: P1 requests [1, 0, 2]
+  const p1Req = requestResource(1, [1, 0, 2], base);
+  assert.equal(p1Req.status, 'SAFE');
+  assert.equal(p1Req.granted, true);
+  assert.equal(p1Req.ruleCode, 'd_safe_granted');
+  assert.deepEqual(p1Req.newState.available, [2, 3, 0]);
+  assert.deepEqual(p1Req.newState.allocation[1], [3, 0, 2]);
+  assert.deepEqual(p1Req.newState.need[1], [0, 2, 0]);
+  assert.ok(p1Req.safetyResult?.isSafe);
+
+  // 2. Deferred / Waiting: P0 requests [7, 4, 3] (within Need [7,4,3] but exceeds Available [3,3,2])
+  const p0WaitReq = requestResource(0, [7, 4, 3], base);
+  assert.equal(p0WaitReq.status, 'WAITING');
+  assert.equal(p0WaitReq.granted, false);
+  assert.equal(p0WaitReq.ruleCode, 'c_exceeds_available');
+  assert.equal(p0WaitReq.rollbackPerformed, false);
+  assert.deepEqual(p0WaitReq.newState.available, [3, 3, 2]); // untouched
+
+  // 3. Rejected: P0 requests [8, 0, 0] (exceeds Need [7,4,3])
+  const p0ExceedReq = requestResource(0, [8, 0, 0], base);
+  assert.equal(p0ExceedReq.status, 'INVALID_INPUT');
+  assert.equal(p0ExceedReq.granted, false);
+  assert.equal(p0ExceedReq.ruleCode, 'b_exceeds_need');
+  assert.equal(p0ExceedReq.rollbackPerformed, false);
+  assert.deepEqual(p0ExceedReq.newState.available, [3, 3, 2]); // untouched
+});
+
+test('Regression #7: Step 5 Final Completion Status & Log Accounting', () => {
+  const base = getScenarioA();
+  const safety = safetyCheck(base.allocation, base.max, base.available, base.need);
+
+  // Simulate replay state transition reaching step 5 (index 4) with transition completed
+  const currentStepIndex = 4;
+  const evaluatingProcessId: number | null = null;
+
+  // Process status model as implemented in AvoidanceTab
+  const getProcessStatus = (pIdx: number) => {
+    const isActivelyEvaluating = evaluatingProcessId === pIdx;
+    const isFinished =
+      currentStepIndex >= 0 &&
+      safety.safeSequence.indexOf(pIdx) <= currentStepIndex &&
+      safety.safeSequence.indexOf(pIdx) !== -1;
+
+    if (isActivelyEvaluating) return 'Evaluating Step';
+    if (isFinished) return 'Simulated Complete';
+    return 'Waiting';
+  };
+
+  // At step 5, after transition completes, ALL processes must be 'Simulated Complete'
+  for (let p = 0; p < base.processCount; p++) {
+    assert.equal(
+      getProcessStatus(p),
+      'Simulated Complete',
+      `Process P${p} must be marked Simulated Complete at end of sequence`
+    );
+  }
+
+  // Active evaluation indicator is strictly null
+  assert.equal(evaluatingProcessId, null);
+
+  // Event Log accounting: Init row (1) + completed steps (currentStepIndex + 1 = 5) = 6 total entries
+  const executedSteps = safety.steps.slice(0, currentStepIndex + 1);
+  assert.equal(executedSteps.length, 5);
+  const totalLogRows = 1 + executedSteps.length;
+  assert.equal(totalLogRows, 6);
+
+  // Replay live work vector at step 5 is finalWork [10, 5, 7]
+  const liveWork = safety.steps[currentStepIndex].workAfter;
+  assert.deepEqual(liveWork, [10, 5, 7]);
+});
+
+test('Regression #8: Replay Reset and Idempotent Request Execution', () => {
+  const base = getScenarioA();
+
+  // 1. Advance replay to step 5, then Reset
+  let currentStepIndex = 4;
+  let evaluatingProcessId: number | null = null;
+  let liveWork = [10, 5, 7];
+
+  // Trigger Reset
+  currentStepIndex = -1;
+  evaluatingProcessId = null;
+  liveWork = base.available;
+
+  assert.equal(currentStepIndex, -1);
+  assert.equal(evaluatingProcessId, null);
+  assert.deepEqual(liveWork, [3, 3, 2]);
+
+  // 2. Sequential requests without stale state leakage:
+  // First submit unsafe request P0 [0,0,2] -> Rollback restores base
+  const res1 = requestResource(0, [0, 0, 2], base);
+  assert.equal(res1.status, 'UNSAFE');
+  assert.equal(res1.rollbackPerformed, true);
+
+  // Subsequent request P1 [1,0,2] tested against committed state
+  const res2 = requestResource(1, [1, 0, 2], res1.newState);
+  assert.equal(res2.status, 'SAFE');
+  assert.equal(res2.granted, true);
+  assert.equal(res2.rollbackPerformed, false);
+  assert.deepEqual(res2.newState.available, [2, 3, 0]);
+
+  // Reset to Scenario A baseline
+  const resetState = getScenarioA();
+  assert.deepEqual(resetState.available, [3, 3, 2]);
+  assert.deepEqual(resetState.allocation[0], [0, 1, 0]);
+  assert.deepEqual(resetState.allocation[1], [2, 0, 0]);
+});
+
+test('Regression #10: Detection Module Scenario D2 Matrix-Reduction Verification & Recovery Semantics', () => {
+  const d2 = getScenarioD2();
+
+  // Initial setup: Available is [0, 0, 0]
+  assert.deepEqual(d2.available, [0, 0, 0]);
+
+  // Run pure multi-instance matrix reduction
+  const result = detectDeadlockMultiInstance(
+    d2.allocation,
+    d2.request,
+    d2.available,
+    d2.processNames,
+    d2.resourceNames
+  );
+
+  // Step 1: P0 has Request [0,0,0] <= Work [0,0,0], so P0 completes and releases Allocation [0,1,0]
+  assert.equal(result.steps.length, 1);
+  assert.equal(result.steps[0].processId, 0);
+  assert.deepEqual(result.steps[0].workBefore, [0, 0, 0]);
+  assert.deepEqual(result.steps[0].allocation, [0, 1, 0]);
+  assert.deepEqual(result.steps[0].workAfter, [0, 1, 0]);
+
+  // Work halts at [0, 1, 0]
+  assert.deepEqual(result.finalWork, [0, 1, 0]);
+
+  // Verify why all remaining processes are blocked:
+  // P1 Request [2,0,2] > Work [0,1,0] (A requires 2, C requires 2)
+  // P2 Request [0,0,1] > Work [0,1,0] (C requires 1)
+  // P3 Request [1,0,0] > Work [0,1,0] (A requires 1)
+  // P4 Request [0,0,2] > Work [0,1,0] (C requires 2)
+  assert.equal(result.hasDeadlock, true);
+  assert.deepEqual(result.deadlockedProcessNames, ['P1', 'P2', 'P3', 'P4']);
+  assert.deepEqual(result.finishArray, [true, false, false, false, false]);
+
+  // Recovery: P0 is NOT deadlocked (finish[0] is true) and cannot be a victim
+  assert.equal(result.finishArray[0], true);
+
+  // Terminate victim P2: holds [3, 0, 3]
+  assert.deepEqual(d2.allocation[2], [3, 0, 3]);
+  const recovery = terminateProcessAndRecover(
+    2,
+    d2.allocation,
+    d2.request,
+    d2.available,
+    false,
+    d2.processNames,
+    d2.resourceNames
+  );
+
+  // Reclaimed resources strictly equal P2's allocation
+  assert.deepEqual(recovery.releasedResources, [3, 0, 3]);
+  assert.deepEqual(recovery.newAvailable, [3, 0, 3]);
+
+  // Terminated process P2 now has 0 allocation and 0 request
+  assert.deepEqual(recovery.newAllocation[2], [0, 0, 0]);
+  assert.deepEqual(recovery.newRequest[2], [0, 0, 0]);
+
+  // Deadlock is completely resolved for all remaining active processes
+  assert.equal(recovery.detectionResult.hasDeadlock, false);
+  assert.equal(recovery.detectionResult.deadlockedProcessIds.length, 0);
+  assert.deepEqual(recovery.detectionResult.resolvedProcessIds, [0, 1, 3, 4]);
+
+  // Conservation of total resource instances before and after recovery
+  const totalBefore = d2.allocation.reduce(
+    (acc, row) => acc.map((val, idx) => val + row[idx]),
+    [...d2.available]
+  );
+  const totalAfter = recovery.newAllocation.reduce(
+    (acc, row) => acc.map((val, idx) => val + row[idx]),
+    [...recovery.newAvailable]
+  );
+  assert.deepEqual(totalBefore, totalAfter);
+  assert.deepEqual(totalBefore, d2.totalInstances);
+});
+
+test('Regression #11: Scenario D3 - Cycle in Multi-Instance RAG Does NOT Imply Deadlock', () => {
+  const d3 = getScenarioD3();
+
+  // Multi-instance detection algorithm verifies NO deadlock
+  const detection = detectDeadlockMultiInstance(
+    d3.allocation,
+    d3.request,
+    d3.available,
+    d3.processNames,
+    d3.resourceNames
+  );
+  assert.equal(detection.hasDeadlock, false);
+  assert.equal(detection.status, 'SAFE');
+  assert.deepEqual(detection.deadlockedProcessNames, []);
+
+  // Meanwhile, the graph topology DOES contain a directed cycle
+  const rag = buildRAG(
+    d3.allocation,
+    d3.request,
+    d3.available,
+    d3.totalInstances,
+    d3.processNames,
+    d3.resourceNames
+  );
+  assert.ok(rag.cycles.length > 0, 'RAG must contain at least one directed cycle');
+
+  // Verify directed edge semantics:
+  // Assignment edges: R -> P
+  // Request edges: P -> R
+  for (const edge of rag.edges) {
+    if (edge.type === 'assignment') {
+      assert.ok(edge.from.startsWith('R'), `Assignment edge ${edge.id} must originate at Resource`);
+      assert.ok(edge.to.startsWith('P'), `Assignment edge ${edge.id} must terminate at Process`);
+    } else {
+      assert.ok(edge.from.startsWith('P'), `Request edge ${edge.id} must originate at Process`);
+      assert.ok(edge.to.startsWith('R'), `Request edge ${edge.id} must terminate at Resource`);
+    }
+  }
 });
 
 test('Test Lab Suite: All test cases TC1 through TC6 pass dynamically', () => {
