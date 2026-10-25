@@ -90,6 +90,7 @@ export default function App() {
 
           {activeTab === 'detection' && (
             <DetectionTab
+              systemState={systemState}
               speed={speed}
               reduceMotion={reduceMotion}
               onStatusChange={setDetectionStatus}

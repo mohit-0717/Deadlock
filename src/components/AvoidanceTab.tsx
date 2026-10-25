@@ -13,11 +13,14 @@ import {
   Check,
   Undo2,
   Info,
+  GitBranch,
 } from 'lucide-react';
 import { RequestHandlingResult, SafetyResult, SystemState, SystemStatus } from '../engine/types.js';
 import { computeNeed, requestResource, safetyCheck } from '../engine/bankers.js';
 import { getScenarioA } from '../engine/scenarios.js';
 import { validateSetup, ValidationIssue } from '../engine/validation.js';
+import { RAGGraphView } from './RAGGraphView.js';
+import { buildRAG } from '../engine/detection.js';
 
 interface AvoidanceTabProps {
   systemState: SystemState;
@@ -49,7 +52,20 @@ export const AvoidanceTab: React.FC<AvoidanceTabProps> = ({
 
   // Inline Matrix Editor Mode
   const [isEditMode, setIsEditMode] = useState<boolean>(false);
+  const [showRAGGraph, setShowRAGGraph] = useState<boolean>(false);
   const [validationErrors, setValidationErrors] = useState<ValidationIssue[]>([]);
+
+  // Compute live RAG graph directly from Banker's current state
+  const ragGraph = useMemo(() => {
+    return buildRAG(
+      systemState.allocation,
+      systemState.need,
+      systemState.available,
+      systemState.totalInstances,
+      systemState.processNames,
+      systemState.resourceNames
+    );
+  }, [systemState]);
 
   // Re-run safety check whenever systemState changes
   useEffect(() => {
@@ -267,6 +283,19 @@ export const AvoidanceTab: React.FC<AvoidanceTabProps> = ({
 
           <div className="flex items-center gap-2">
             <button
+              onClick={() => setShowRAGGraph(!showRAGGraph)}
+              className={`px-3 py-1.5 rounded-lg text-xs font-semibold flex items-center gap-1.5 border transition-colors cursor-pointer ${
+                showRAGGraph
+                  ? 'bg-indigo-50 text-indigo-700 border-indigo-300 font-bold'
+                  : 'bg-white hover:bg-slate-100 text-slate-700 border-slate-300'
+              }`}
+              title="Toggle live Resource Allocation Graph for these Banker's inputs"
+            >
+              <GitBranch className="w-3.5 h-3.5" />
+              <span>{showRAGGraph ? 'Hide RAG Graph' : 'Show Live RAG Graph'}</span>
+            </button>
+
+            <button
               onClick={() => setIsEditMode(!isEditMode)}
               className={`px-3 py-1.5 rounded-lg text-xs font-semibold flex items-center gap-1.5 border transition-colors cursor-pointer ${
                 isEditMode
@@ -470,6 +499,35 @@ export const AvoidanceTab: React.FC<AvoidanceTabProps> = ({
           </table>
         </div>
       </div>
+
+      {/* Optional Live RAG Graph corresponding to Banker's matrices */}
+      {showRAGGraph && (
+        <div className="bg-white rounded-xl border border-slate-200 shadow-2xs overflow-hidden">
+          <div className="bg-slate-50 px-5 py-3 border-b border-slate-200 flex flex-wrap items-center justify-between gap-2">
+            <div className="flex items-center gap-2">
+              <GitBranch className="w-4 h-4 text-indigo-600" />
+              <h4 className="text-sm font-bold text-slate-800">
+                Live Resource Allocation Graph (from Banker&apos;s Allocation &amp; Need)
+              </h4>
+            </div>
+            <span className="text-xs text-slate-500 font-mono">
+              Solid edges = Holding (Allocation) &bull; Dashed edges = Requesting (Need)
+            </span>
+          </div>
+          <div className="p-4">
+            <RAGGraphView
+              graph={ragGraph}
+              hasDeadlock={!safetyResult.isSafe}
+              deadlockedProcessNames={
+                !safetyResult.isSafe
+                  ? safetyResult.stuckProcesses.map((p) => p.processName)
+                  : []
+              }
+              isSingleInstance={false}
+            />
+          </div>
+        </div>
+      )}
 
       {/* 3. Safety Check & Step-by-Step Execution */}
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">

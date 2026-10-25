@@ -224,6 +224,18 @@ export const RAGGraphView: React.FC<RAGGraphViewProps> = ({
           </marker>
 
           <marker
+            id="arrow-assign-deadlock"
+            viewBox="0 0 10 10"
+            refX="26"
+            refY="5"
+            markerWidth="7"
+            markerHeight="7"
+            orient="auto-start-reverse"
+          >
+            <path d="M 0 1.5 L 8 5 L 0 8.5 z" fill="#dc2626" />
+          </marker>
+
+          <marker
             id="arrow-request"
             viewBox="0 0 10 10"
             refX="34"
@@ -233,6 +245,18 @@ export const RAGGraphView: React.FC<RAGGraphViewProps> = ({
             orient="auto-start-reverse"
           >
             <path d="M 0 1.5 L 8 5 L 0 8.5 z" fill="#d97706" />
+          </marker>
+
+          <marker
+            id="arrow-request-deadlock"
+            viewBox="0 0 10 10"
+            refX="34"
+            refY="5"
+            markerWidth="7"
+            markerHeight="7"
+            orient="auto-start-reverse"
+          >
+            <path d="M 0 1.5 L 8 5 L 0 8.5 z" fill="#dc2626" />
           </marker>
 
           <marker
@@ -293,32 +317,28 @@ export const RAGGraphView: React.FC<RAGGraphViewProps> = ({
           let strokeColor = isAssign ? '#2563eb' : '#d97706';
           let marker = isAssign ? 'url(#arrow-assign)' : 'url(#arrow-request)';
           let strokeWidth = 2;
-          let dashArray: string | undefined = undefined;
-          let animClass: string | undefined = undefined;
+          let dashArray: string | undefined = isAssign ? undefined : '5,4';
+          let animClass: string | undefined = isAssign ? undefined : 'animate-dash-flow-slow';
 
           if (isSingleInstanceCycle) {
             strokeColor = '#dc2626';
-            marker = 'url(#arrow-cycle)';
+            marker = isAssign ? 'url(#arrow-assign-deadlock)' : 'url(#arrow-request-deadlock)';
             strokeWidth = 2.8;
-            dashArray = '7,4';
-            animClass = 'animate-dash-flow-fast';
+            dashArray = isAssign ? undefined : '6,4';
+            animClass = isAssign ? undefined : 'animate-dash-flow-fast';
           } else if (isDeadlockedDependency) {
             strokeColor = '#dc2626';
-            marker = 'url(#arrow-cycle)';
-            strokeWidth = 2.5;
-            dashArray = '7,4';
-            animClass = 'animate-dash-flow-fast';
+            marker = isAssign ? 'url(#arrow-assign-deadlock)' : 'url(#arrow-request-deadlock)';
+            strokeWidth = 2.4;
+            // Assignments stay solid, requests stay dashed for distinct visual recognition
+            dashArray = isAssign ? undefined : '6,4';
+            animClass = isAssign ? undefined : 'animate-dash-flow-fast';
           } else if (isMultiInstanceCycle) {
             strokeColor = '#f59e0b';
             marker = 'url(#arrow-cycle-warning)';
             strokeWidth = 2.2;
-            dashArray = '5,4';
-            animClass = 'animate-dash-flow';
-          } else if (!isAssign) {
-            // Pending request edges pulse gently
-            strokeWidth = 1.9;
-            dashArray = '5,4';
-            animClass = 'animate-dash-flow-slow';
+            dashArray = isAssign ? undefined : '5,4';
+            animClass = isAssign ? undefined : 'animate-dash-flow';
           }
 
           const isIncident = hoveredNodeId

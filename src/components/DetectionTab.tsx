@@ -6,11 +6,14 @@ import {
   CheckCircle2,
   GitBranch,
   AlertTriangle,
+  Edit3,
+  Zap,
 } from 'lucide-react';
 import {
   DetectionResult,
   DetectionStep,
   RAGGraph,
+  SystemState,
   SystemStatus,
 } from '../engine/types.js';
 import {
@@ -43,16 +46,19 @@ interface DetectionTabProps {
   reduceMotion?: boolean;
   onStatusChange?: (status: SystemStatus) => void;
   onDetectionContextChange?: (ctx: DetectionContextData) => void;
+  systemState?: SystemState;
 }
 
-type ExamplePreset = 'D1' | 'D2' | 'D2_VARIANT' | 'D3';
+type ExamplePreset = 'BANKER' | 'D1' | 'D2' | 'D2_VARIANT' | 'D3' | 'CUSTOM';
 
 export const DetectionTab: React.FC<DetectionTabProps> = ({
   speed = 1.0,
   onStatusChange,
   onDetectionContextChange,
+  systemState,
 }) => {
   const [selectedPreset, setSelectedPreset] = useState<ExamplePreset>('D2');
+  const [isEditMode, setIsEditMode] = useState(false);
 
   const [allocation, setAllocation] = useState<number[][]>(() => getScenarioD2().allocation);
   const [request, setRequest] = useState<number[][]>(() => getScenarioD2().request);
@@ -134,10 +140,84 @@ export const DetectionTab: React.FC<DetectionTabProps> = ({
     return { finalWork, blockedList };
   }, [detectionResult, isSingleInstance, processNames, request, resourceNames]);
 
+  const syncFromBankers = () => {
+    if (!systemState) return;
+    setAllocation(systemState.allocation.map((row) => [...row]));
+    setRequest(systemState.need.map((row) => [...row]));
+    setAvailable([...systemState.available]);
+    setTotalInstances(
+      systemState.totalInstances
+        ? [...systemState.totalInstances]
+        : systemState.available.map(
+            (avail, rIdx) => avail + systemState.allocation.reduce((sum, row) => sum + row[rIdx], 0)
+          )
+    );
+    setProcessNames([...systemState.processNames]);
+    setResourceNames([...systemState.resourceNames]);
+    setTerminatedProcessId(null);
+    setRecoveryOutcome(null);
+  };
+
+  useEffect(() => {
+    if (selectedPreset === 'BANKER' && systemState) {
+      setAllocation(systemState.allocation.map((row) => [...row]));
+      setRequest(systemState.need.map((row) => [...row]));
+      setAvailable([...systemState.available]);
+      setTotalInstances(
+        systemState.totalInstances
+          ? [...systemState.totalInstances]
+          : systemState.available.map(
+              (avail, rIdx) => avail + systemState.allocation.reduce((sum, row) => sum + row[rIdx], 0)
+            )
+      );
+      setProcessNames([...systemState.processNames]);
+      setResourceNames([...systemState.resourceNames]);
+    }
+  }, [systemState, selectedPreset]);
+
+  const handleAllocationCellChange = (pIdx: number, rIdx: number, valStr: string) => {
+    const val = parseInt(valStr, 10);
+    const num = isNaN(val) ? 0 : Math.max(0, val);
+    const next = allocation.map((row) => [...row]);
+    next[pIdx][rIdx] = num;
+    setAllocation(next);
+    setSelectedPreset('CUSTOM');
+    setTerminatedProcessId(null);
+    setRecoveryOutcome(null);
+  };
+
+  const handleRequestCellChange = (pIdx: number, rIdx: number, valStr: string) => {
+    const val = parseInt(valStr, 10);
+    const num = isNaN(val) ? 0 : Math.max(0, val);
+    const next = request.map((row) => [...row]);
+    next[pIdx][rIdx] = num;
+    setRequest(next);
+    setSelectedPreset('CUSTOM');
+    setTerminatedProcessId(null);
+    setRecoveryOutcome(null);
+  };
+
+  const handleAvailableCellChange = (rIdx: number, valStr: string) => {
+    const val = parseInt(valStr, 10);
+    const num = isNaN(val) ? 0 : Math.max(0, val);
+    const next = [...available];
+    next[rIdx] = num;
+    setAvailable(next);
+    setSelectedPreset('CUSTOM');
+    setTerminatedProcessId(null);
+    setRecoveryOutcome(null);
+  };
+
   const loadPreset = (preset: ExamplePreset) => {
     setSelectedPreset(preset);
     setTerminatedProcessId(null);
     setRecoveryOutcome(null);
+    setIsEditMode(false);
+
+    if (preset === 'BANKER') {
+      syncFromBankers();
+      return;
+    }
 
     let data;
     switch (preset) {
@@ -228,7 +308,23 @@ export const DetectionTab: React.FC<DetectionTabProps> = ({
 
           {/* Preset Buttons */}
           <div className="flex flex-wrap items-center gap-2 shrink-0">
-            <span className="text-xs font-bold text-slate-600">Preset Scenarios:</span>
+            {systemState && (
+              <button
+                onClick={() => {
+                  setSelectedPreset('BANKER');
+                  syncFromBankers();
+                }}
+                className={`px-3 py-1.5 rounded-lg text-xs font-semibold border transition-colors cursor-pointer flex items-center gap-1.5 ${
+                  selectedPreset === 'BANKER'
+                    ? 'bg-amber-500 text-white border-amber-600 font-bold shadow-xs'
+                    : 'bg-amber-50 hover:bg-amber-100 text-amber-900 border-amber-300'
+                }`}
+                title="Synchronize live matrices from Banker's Avoidance (Tab 1)"
+              >
+                <Zap className="w-3.5 h-3.5" />
+                <span>Live Banker&apos;s Inputs (Tab 1)</span>
+              </button>
+            )}
             <button
               onClick={() => loadPreset('D1')}
               className={`px-3 py-1.5 rounded-lg text-xs font-semibold border transition-colors cursor-pointer ${
@@ -334,13 +430,30 @@ export const DetectionTab: React.FC<DetectionTabProps> = ({
         <div className="lg:col-span-5 space-y-4">
           {/* Allocation & Request Matrices */}
           <div className="bg-white rounded-xl border border-slate-200 shadow-2xs overflow-hidden">
-            <div className="bg-slate-50 px-4 py-3 border-b border-slate-200 flex items-center justify-between">
-              <span className="text-sm font-bold text-slate-800">
-                Allocation &amp; Request Matrices
-              </span>
-              <span className="text-xs font-mono font-bold text-indigo-700 bg-indigo-50 px-2.5 py-1 rounded border border-indigo-200">
-                Available: [{available.join(', ')}]
-              </span>
+            <div className="bg-slate-50 px-4 py-3 border-b border-slate-200 flex flex-wrap items-center justify-between gap-2">
+              <div className="flex items-center gap-2">
+                <span className="text-sm font-bold text-slate-800">
+                  Allocation &amp; Request Matrices
+                </span>
+                {selectedPreset === 'CUSTOM' && (
+                  <span className="text-[10px] font-bold text-amber-700 bg-amber-50 px-1.5 py-0.5 rounded border border-amber-200">
+                    Custom Inputs
+                  </span>
+                )}
+              </div>
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={() => setIsEditMode(!isEditMode)}
+                  className={`px-2.5 py-1 rounded text-xs font-semibold flex items-center gap-1 border transition-colors cursor-pointer ${
+                    isEditMode
+                      ? 'bg-indigo-600 text-white border-indigo-600'
+                      : 'bg-white hover:bg-slate-100 text-slate-700 border-slate-300'
+                  }`}
+                >
+                  <Edit3 className="w-3 h-3" />
+                  <span>{isEditMode ? 'Done' : 'Edit Matrices'}</span>
+                </button>
+              </div>
             </div>
 
             <div className="p-3 overflow-x-auto">
@@ -376,10 +489,42 @@ export const DetectionTab: React.FC<DetectionTabProps> = ({
                           {pName}
                         </td>
                         <td className="py-2 px-3 text-blue-900 font-bold">
-                          [{allocation[i].join(', ')}]
+                          {isEditMode ? (
+                            <div className="flex items-center justify-center gap-1">
+                              {allocation[i].map((val, rIdx) => (
+                                <input
+                                  key={rIdx}
+                                  type="number"
+                                  min={0}
+                                  value={val}
+                                  onChange={(e) => handleAllocationCellChange(i, rIdx, e.target.value)}
+                                  className="w-8 h-6 text-center bg-white border border-slate-300 rounded text-blue-900 font-bold text-xs"
+                                  title={`${pName} holding ${resourceNames[rIdx] || rIdx}`}
+                                />
+                              ))}
+                            </div>
+                          ) : (
+                            `[${allocation[i].join(', ')}]`
+                          )}
                         </td>
                         <td className="py-2 px-3 text-amber-900 font-bold">
-                          [{request[i].join(', ')}]
+                          {isEditMode ? (
+                            <div className="flex items-center justify-center gap-1">
+                              {request[i].map((val, rIdx) => (
+                                <input
+                                  key={rIdx}
+                                  type="number"
+                                  min={0}
+                                  value={val}
+                                  onChange={(e) => handleRequestCellChange(i, rIdx, e.target.value)}
+                                  className="w-8 h-6 text-center bg-white border border-slate-300 rounded text-amber-900 font-bold text-xs"
+                                  title={`${pName} requesting ${resourceNames[rIdx] || rIdx}`}
+                                />
+                              ))}
+                            </div>
+                          ) : (
+                            `[${request[i].join(', ')}]`
+                          )}
                         </td>
                         <td className="py-2 px-3">
                           <span
@@ -396,6 +541,37 @@ export const DetectionTab: React.FC<DetectionTabProps> = ({
                     );
                   })}
                 </tbody>
+                <tfoot>
+                  <tr className="border-t-2 border-slate-200 bg-slate-50 font-mono text-xs">
+                    <td className="py-2.5 px-3 text-left font-sans font-bold text-slate-800">Available</td>
+                    <td colSpan={2} className="py-2.5 px-3 text-center">
+                      {isEditMode ? (
+                        <div className="flex items-center justify-center gap-1.5 flex-wrap">
+                          <span className="text-[11px] font-sans text-slate-500 mr-1">Work:</span>
+                          {available.map((val, rIdx) => (
+                            <div key={rIdx} className="flex items-center gap-0.5">
+                              <span className="text-[10px] text-slate-400 font-mono">{resourceNames[rIdx] || rIdx}:</span>
+                              <input
+                                type="number"
+                                min={0}
+                                value={val}
+                                onChange={(e) => handleAvailableCellChange(rIdx, e.target.value)}
+                                className="w-8 h-6 text-center bg-white border border-emerald-400 rounded text-emerald-950 font-bold text-xs"
+                              />
+                            </div>
+                          ))}
+                        </div>
+                      ) : (
+                        <span className="font-bold text-indigo-700 bg-indigo-50 px-2.5 py-0.5 rounded border border-indigo-200">
+                          Work / Available: [{available.join(', ')}]
+                        </span>
+                      )}
+                    </td>
+                    <td className="py-2.5 px-3 text-slate-400 text-[11px] font-sans">
+                      Free pool
+                    </td>
+                  </tr>
+                </tfoot>
               </table>
             </div>
           </div>
