@@ -1,6 +1,5 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import {
-  Play,
   SkipForward,
   RotateCcw,
   Send,
@@ -17,6 +16,8 @@ import {
   Plus,
   Minus,
   Calculator,
+  X,
+  Sparkles,
 } from 'lucide-react';
 import { RequestHandlingResult, SafetyResult, SystemState, SystemStatus } from '../engine/types.js';
 import { computeNeed, requestResource, safetyCheck } from '../engine/bankers.js';
@@ -60,6 +61,21 @@ export const AvoidanceTab: React.FC<AvoidanceTabProps> = ({
   // Tracks whether the safety algorithm has been executed for the current matrices
   const [isSafetyEvaluated, setIsSafetyEvaluated] = useState<boolean>(true);
 
+  // Step pop-up modal state
+  const [stepPopup, setStepPopup] = useState<{
+    isOpen: boolean;
+    stepNumber: number;
+    totalSteps: number;
+    processName: string;
+    workBefore: number[];
+    need: number[];
+    allocation: number[];
+    workAfter: number[];
+    safeSequenceSoFar: string[];
+    isFinalStep: boolean;
+    isSystemSafe: boolean;
+  } | null>(null);
+
   // Compute live RAG graph directly from Banker's current state
   const ragGraph = useMemo(() => {
     return buildRAG(
@@ -93,6 +109,17 @@ export const AvoidanceTab: React.FC<AvoidanceTabProps> = ({
     return currentStep ? currentStep.workAfter : safetyResult.finalWork;
   }, [isSafetyEvaluated, currentStepIndex, safetyResult, initialWorkVector]);
 
+  // Steps that have been executed one by one so far
+  const executedSteps = useMemo(() => {
+    if (!isSafetyEvaluated || currentStepIndex < 0) return [];
+    return safetyResult.steps.slice(0, currentStepIndex + 1);
+  }, [isSafetyEvaluated, currentStepIndex, safetyResult]);
+
+  // Verified safe sequence assembled step-by-step
+  const verifiedSequenceSoFar = useMemo(() => {
+    return executedSteps.map((s) => s.processName);
+  }, [executedSteps]);
+
   // Executes the safety check on demand when user presses button
   const runSafetyEvaluation = () => {
     const res = safetyCheck(
@@ -103,32 +130,66 @@ export const AvoidanceTab: React.FC<AvoidanceTabProps> = ({
     );
     setSafetyResult(res);
     setIsSafetyEvaluated(true);
-    if (onStatusChange) {
-      onStatusChange(res.status);
-    }
     return res;
   };
 
-  // Step forward in safety algorithm
+  // Step forward: executes exactly ONE process, updates trace, sequence, and opens popup!
   const stepForward = () => {
     let activeRes = safetyResult;
     if (!isSafetyEvaluated) {
       activeRes = runSafetyEvaluation();
-      setCurrentStepIndex(0);
+    }
+
+    if (activeRes.steps.length === 0) {
+      if (onStatusChange) {
+        onStatusChange('UNSAFE');
+      }
+      setStepPopup({
+        isOpen: true,
+        stepNumber: 0,
+        totalSteps: 0,
+        processName: 'None',
+        workBefore: systemState.available,
+        need: [],
+        allocation: [],
+        workAfter: systemState.available,
+        safeSequenceSoFar: [],
+        isFinalStep: true,
+        isSystemSafe: false,
+      });
       return;
     }
-    if (currentStepIndex + 1 < activeRes.steps.length) {
-      setCurrentStepIndex((prev) => prev + 1);
-    }
-  };
 
-  const runAllSteps = () => {
-    const res = runSafetyEvaluation();
-    setCurrentStepIndex(res.steps.length - 1);
+    const nextIndex = currentStepIndex + 1;
+    if (nextIndex < activeRes.steps.length) {
+      setCurrentStepIndex(nextIndex);
+      const step = activeRes.steps[nextIndex];
+      const seqSoFar = activeRes.steps.slice(0, nextIndex + 1).map((s) => s.processName);
+      const isFinal = nextIndex === activeRes.steps.length - 1;
+
+      if (isFinal && onStatusChange) {
+        onStatusChange(activeRes.status);
+      }
+
+      setStepPopup({
+        isOpen: true,
+        stepNumber: nextIndex + 1,
+        totalSteps: activeRes.steps.length,
+        processName: step.processName,
+        workBefore: step.workBefore,
+        need: step.need,
+        allocation: step.allocation,
+        workAfter: step.workAfter,
+        safeSequenceSoFar: seqSoFar,
+        isFinalStep: isFinal,
+        isSystemSafe: activeRes.isSafe,
+      });
+    }
   };
 
   const resetSteps = () => {
     setCurrentStepIndex(-1);
+    setStepPopup(null);
   };
 
   // Handle resource request submission (only evaluates when button is pressed)
@@ -910,88 +971,124 @@ export const AvoidanceTab: React.FC<AvoidanceTabProps> = ({
               </p>
             </div>
 
-            {/* Simple Step Controls */}
+            {/* Step Controls (No 'Run Full Check') */}
             <div className="flex items-center gap-2">
               <button
-                onClick={runAllSteps}
-                className="px-3 py-1.5 rounded-lg text-xs font-semibold bg-indigo-600 hover:bg-indigo-700 text-white flex items-center gap-1.5 transition-colors cursor-pointer shadow-xs"
-                title="Run complete algorithm to find safe sequence"
-              >
-                <Play className="w-3.5 h-3.5" />
-                <span>Run Full Check</span>
-              </button>
-
-              <button
                 onClick={stepForward}
-                disabled={currentStepIndex + 1 >= safetyResult.steps.length}
-                className="px-3 py-1.5 rounded-lg text-xs font-semibold bg-slate-100 hover:bg-slate-200 disabled:opacity-40 text-slate-700 border border-slate-300 flex items-center gap-1.5 transition-colors cursor-pointer"
-                title="Execute next process in safe sequence"
+                disabled={isSafetyEvaluated && currentStepIndex >= 0 && currentStepIndex + 1 >= safetyResult.steps.length}
+                className="px-4 py-2 rounded-xl text-xs font-bold bg-indigo-600 hover:bg-indigo-700 disabled:opacity-40 disabled:cursor-not-allowed text-white flex items-center gap-1.5 transition-colors cursor-pointer shadow-xs"
+                title="Execute next process in safe sequence and view pop-up"
               >
                 <SkipForward className="w-3.5 h-3.5" />
-                <span>Step Process</span>
+                <span>
+                  {currentStepIndex < 0
+                    ? 'Start Step 1'
+                    : currentStepIndex + 1 < safetyResult.steps.length
+                    ? `Next Step (${currentStepIndex + 2})`
+                    : 'All Steps Completed'}
+                </span>
               </button>
 
               <button
                 onClick={resetSteps}
-                className="p-1.5 rounded-lg text-slate-500 hover:text-slate-800 hover:bg-slate-100 border border-slate-300 transition-colors cursor-pointer"
-                title="Reset step counter"
+                className="p-2 rounded-xl text-slate-500 hover:text-slate-800 hover:bg-slate-100 border border-slate-300 transition-colors cursor-pointer"
+                title="Reset stepper"
               >
                 <RotateCcw className="w-3.5 h-3.5" />
               </button>
             </div>
           </div>
 
-          {/* Big, Obvious Result Banner */}
+          {/* Verified Sequence Banner — updates step-by-step as processes execute */}
           {!isSafetyEvaluated ? (
-            <div className="p-4 rounded-xl bg-amber-50 border border-amber-200 text-amber-950 space-y-2">
+            <div className="p-4 rounded-xl bg-amber-50 border border-amber-200 text-amber-950 space-y-1.5">
               <div className="flex items-center gap-2">
-                <AlertTriangle className="w-5 h-5 text-amber-600 shrink-0" />
+                <AlertTriangle className="w-4 h-4 text-amber-600 shrink-0" />
                 <span className="font-bold text-sm text-amber-900">
-                  Matrices Modified &bull; Evaluation Pending
+                  Matrices Modified &bull; Ready for Step-by-Step Check
                 </span>
               </div>
               <p className="text-xs text-amber-800 leading-relaxed">
-                Inputs have been modified. Press <strong>&ldquo;Run Full Check&rdquo;</strong> to run Dijkstra&apos;s Safety Algorithm and find the safe sequence.
+                Inputs have been edited. Press <strong>&ldquo;Start Step 1&rdquo;</strong> to step through each process one by one.
               </p>
             </div>
-          ) : safetyResult.isSafe ? (
-            <div className="p-4 rounded-xl bg-emerald-50 border border-emerald-200 text-emerald-950 space-y-2">
-              <div className="flex items-center gap-2">
-                <CheckCircle2 className="w-5 h-5 text-emerald-600 shrink-0" />
-                <span className="font-bold text-sm text-emerald-900">
-                  SYSTEM IS IN A SAFE STATE
+          ) : currentStepIndex < 0 ? (
+            <div className="p-4 rounded-xl bg-slate-50 border border-slate-200 text-slate-800 space-y-2">
+              <div className="flex items-center justify-between gap-2">
+                <div className="flex items-center gap-2">
+                  <span className="w-2.5 h-2.5 rounded-full bg-indigo-600" />
+                  <span className="font-bold text-sm text-slate-900">
+                    Step-by-Step Execution Ready
+                  </span>
+                </div>
+                <span className="text-xs font-mono text-slate-500">
+                  Work = [{initialWorkVector.join(', ')}]
                 </span>
               </div>
-              <div className="flex flex-wrap items-center gap-2 pt-1">
-                <span className="text-xs font-semibold text-emerald-800">Verified Safe Sequence:</span>
-                <span className="font-mono text-sm font-bold bg-white px-3 py-1 rounded-lg border border-emerald-300 text-emerald-900 shadow-2xs">
-                  &lt; {safetyResult.safeSequenceNames.join(' → ')} &gt;
+              <div className="flex flex-wrap items-center gap-2 pt-0.5">
+                <span className="text-xs font-semibold text-slate-600">Verified Sequence:</span>
+                <span className="font-mono text-xs font-medium text-slate-400 italic">
+                  None yet &mdash; Click &ldquo;Start Step 1&rdquo; to execute
                 </span>
               </div>
-              <p className="text-xs text-emerald-800 leading-relaxed pt-1">
-                A safe sequence exists. Every process can obtain its maximum needed resources, complete execution, and release resources back into the available pool. No deadlock can occur.
-              </p>
             </div>
           ) : (
-            <div className="p-4 rounded-xl bg-rose-50 border border-rose-200 text-rose-950 space-y-2">
-              <div className="flex items-center gap-2">
-                <AlertTriangle className="w-5 h-5 text-rose-600 shrink-0" />
-                <span className="font-bold text-sm text-rose-900">
-                  SYSTEM IS IN AN UNSAFE STATE
+            <div
+              className={`p-4 rounded-xl border space-y-2 ${
+                currentStepIndex + 1 === safetyResult.steps.length
+                  ? safetyResult.isSafe
+                    ? 'bg-emerald-50 border-emerald-200 text-emerald-950'
+                    : 'bg-rose-50 border-rose-200 text-rose-950'
+                  : 'bg-indigo-50/70 border-indigo-200 text-indigo-950'
+              }`}
+            >
+              <div className="flex items-center justify-between gap-2">
+                <div className="flex items-center gap-2">
+                  {currentStepIndex + 1 === safetyResult.steps.length && safetyResult.isSafe ? (
+                    <CheckCircle2 className="w-5 h-5 text-emerald-600 shrink-0" />
+                  ) : currentStepIndex + 1 === safetyResult.steps.length && !safetyResult.isSafe ? (
+                    <AlertTriangle className="w-5 h-5 text-rose-600 shrink-0" />
+                  ) : (
+                    <span className="w-2.5 h-2.5 rounded-full bg-indigo-600 animate-pulse" />
+                  )}
+                  <span className="font-bold text-sm text-slate-900">
+                    {currentStepIndex + 1 === safetyResult.steps.length
+                      ? safetyResult.isSafe
+                        ? 'SYSTEM VERIFIED SAFE (ALL PROCESSES FINISHED)'
+                        : 'SYSTEM UNSAFE (HALTED)'
+                      : `STEPPING: PROCESS ${safetyResult.steps[currentStepIndex]?.processName} EXECUTED`}
+                  </span>
+                </div>
+                <span className="text-xs font-mono font-bold px-2 py-0.5 rounded bg-white border border-slate-200 text-slate-700 shadow-2xs">
+                  Step {currentStepIndex + 1} of {safetyResult.steps.length}
                 </span>
               </div>
-              <p className="text-xs text-rose-800 leading-relaxed">
-                {safetyResult.explanation || 'No safe sequence exists. The remaining processes have resource requirements that exceed the currently available pool.'}
-              </p>
+
+              <div className="flex flex-wrap items-center gap-2 pt-1">
+                <span className="text-xs font-semibold text-slate-700">Verified Sequence:</span>
+                <span className="font-mono text-sm font-bold bg-white px-3 py-1 rounded-lg border border-indigo-200 text-indigo-950 shadow-2xs">
+                  &lt; {verifiedSequenceSoFar.join(' → ')} &gt;
+                </span>
+              </div>
             </div>
           )}
 
-          {/* Clean Step-by-Step Table */}
-          {isSafetyEvaluated && safetyResult.steps.length > 0 && (
-            <div className="space-y-2 pt-2">
+          {/* Execution Steps Trace Table — rows appear one by one as executed */}
+          <div className="space-y-2 pt-2">
+            <div className="flex items-center justify-between">
               <span className="text-xs font-bold text-slate-700 block">
                 Execution Steps Trace (Work = Work + Allocation):
               </span>
+              <span className="text-[11px] text-slate-500 font-mono">
+                {executedSteps.length} of {safetyResult.steps.length} executed
+              </span>
+            </div>
+
+            {executedSteps.length === 0 ? (
+              <div className="p-4 rounded-lg bg-slate-50 border border-dashed border-slate-300 text-center text-xs text-slate-500">
+                Click <strong>&ldquo;Start Step 1&rdquo;</strong> to execute and reveal steps one by one.
+              </div>
+            ) : (
               <div className="overflow-x-auto">
                 <table className="w-full text-xs border border-slate-200 rounded-lg overflow-hidden">
                   <thead>
@@ -1004,25 +1101,25 @@ export const AvoidanceTab: React.FC<AvoidanceTabProps> = ({
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-100 font-mono text-xs">
-                    {safetyResult.steps.map((step, idx) => {
-                      const isExecuted = idx <= currentStepIndex;
+                    {executedSteps.map((step, idx) => {
+                      const isLatest = idx === currentStepIndex;
 
                       return (
                         <tr
                           key={idx}
                           className={`transition-colors ${
-                            isExecuted
-                              ? 'bg-emerald-50/60 font-semibold text-emerald-950'
-                              : 'text-slate-400'
+                            isLatest
+                              ? 'bg-emerald-50/80 font-bold text-emerald-950'
+                              : 'bg-white text-slate-700'
                           }`}
                         >
                           <td className="py-2 px-3 font-sans">
                             {idx + 1}
                           </td>
-                          <td className="py-2 px-3 font-sans font-bold">
+                          <td className="py-2 px-3 font-sans font-bold text-indigo-900">
                             {step.processName}
                           </td>
-                          <td className="py-2 px-3">
+                          <td className="py-2 px-3 text-slate-600">
                             [{step.workBefore.join(', ')}]
                           </td>
                           <td className="py-2 px-3 text-blue-800">
@@ -1037,8 +1134,8 @@ export const AvoidanceTab: React.FC<AvoidanceTabProps> = ({
                   </tbody>
                 </table>
               </div>
-            </div>
-          )}
+            )}
+          </div>
         </div>
 
         {/* Right: Resource-Request Algorithm Tester (5 cols) */}
@@ -1203,6 +1300,129 @@ export const AvoidanceTab: React.FC<AvoidanceTabProps> = ({
           )}
         </div>
       </div>
+
+      {/* Step Execution Pop-up Modal */}
+      {stepPopup && stepPopup.isOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/40 backdrop-blur-xs animate-fade-in">
+          <div className="bg-white rounded-2xl border border-slate-200 shadow-2xl max-w-lg w-full p-6 space-y-4 animate-scale-in">
+            {/* Modal Header */}
+            <div className="flex items-start justify-between gap-3 border-b border-slate-100 pb-3">
+              <div className="flex items-center gap-2.5">
+                <div
+                  className={`p-2 rounded-xl ${
+                    stepPopup.isFinalStep && stepPopup.isSystemSafe
+                      ? 'bg-emerald-100 text-emerald-800'
+                      : 'bg-indigo-100 text-indigo-800'
+                  }`}
+                >
+                  {stepPopup.isFinalStep && stepPopup.isSystemSafe ? (
+                    <Sparkles className="w-5 h-5 text-emerald-600" />
+                  ) : (
+                    <CheckCircle2 className="w-5 h-5 text-indigo-600" />
+                  )}
+                </div>
+                <div>
+                  <div className="flex items-center gap-2">
+                    <span className="text-xs font-bold px-2 py-0.5 rounded-full bg-slate-100 text-slate-700 font-mono">
+                      Step {stepPopup.stepNumber} of {stepPopup.totalSteps}
+                    </span>
+                    {stepPopup.isFinalStep && (
+                      <span
+                        className={`text-xs font-bold px-2 py-0.5 rounded-full ${
+                          stepPopup.isSystemSafe
+                            ? 'bg-emerald-100 text-emerald-800'
+                            : 'bg-rose-100 text-rose-800'
+                        }`}
+                      >
+                        {stepPopup.isSystemSafe ? 'Final Step — Safe' : 'Halted — Unsafe'}
+                      </span>
+                    )}
+                  </div>
+                  <h4 className="text-base font-bold text-slate-900 mt-1">
+                    Process {stepPopup.processName} Executed
+                  </h4>
+                </div>
+              </div>
+
+              <button
+                onClick={() => setStepPopup(null)}
+                className="p-1 rounded-lg text-slate-400 hover:text-slate-700 hover:bg-slate-100 transition-colors cursor-pointer"
+                title="Close pop-up"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            {/* Modal Body: The 3 Core Formula Steps */}
+            <div className="space-y-3 text-xs">
+              {/* Check Condition */}
+              <div className="p-3 rounded-xl bg-slate-50 border border-slate-200 space-y-1">
+                <span className="font-bold text-slate-700 block">
+                  1. Condition Verified: Need &le; Work
+                </span>
+                <p className="font-mono text-slate-800">
+                  {stepPopup.processName} Need [{stepPopup.need.join(', ')}] &le; Work [{stepPopup.workBefore.join(', ')}]
+                </p>
+                <p className="text-[11px] text-emerald-700 font-sans font-semibold">
+                  &check; Resources are available. Process runs and finishes execution.
+                </p>
+              </div>
+
+              {/* Resource Release */}
+              <div className="p-3 rounded-xl bg-blue-50/70 border border-blue-200 space-y-1">
+                <span className="font-bold text-blue-950 block">
+                  2. Resources Released Back to Pool:
+                </span>
+                <p className="font-mono text-blue-900">
+                  Work = Work + Allocation = [{stepPopup.workBefore.join(', ')}] + [{stepPopup.allocation.join(', ')}]
+                </p>
+                <p className="font-mono font-bold text-emerald-800 text-xs">
+                  &rarr; New Work Available = [{stepPopup.workAfter.join(', ')}]
+                </p>
+              </div>
+
+              {/* Verified Sequence So Far */}
+              <div className="p-3 rounded-xl bg-emerald-50/70 border border-emerald-200 space-y-1.5">
+                <span className="font-bold text-emerald-950 block">
+                  3. Verified Safe Sequence So Far:
+                </span>
+                <div className="font-mono font-bold text-sm bg-white px-3 py-1.5 rounded-lg border border-emerald-300 text-emerald-900 shadow-2xs">
+                  &lt; {stepPopup.safeSequenceSoFar.join(' → ')} &gt;
+                </div>
+              </div>
+
+              {stepPopup.isFinalStep && stepPopup.isSystemSafe && (
+                <div className="p-3 rounded-xl bg-emerald-100/60 border border-emerald-300 text-emerald-950 text-xs font-semibold flex items-center gap-2">
+                  <Sparkles className="w-4 h-4 text-emerald-700 shrink-0" />
+                  <span>All processes safely executed. The system is verified deadlock-free!</span>
+                </div>
+              )}
+            </div>
+
+            {/* Modal Actions */}
+            <div className="flex items-center justify-end gap-2 pt-2 border-t border-slate-100">
+              <button
+                onClick={() => setStepPopup(null)}
+                className="px-4 py-2 rounded-xl text-xs font-semibold bg-slate-100 hover:bg-slate-200 text-slate-700 transition-colors cursor-pointer"
+              >
+                Close
+              </button>
+
+              {!stepPopup.isFinalStep && (
+                <button
+                  onClick={() => {
+                    stepForward();
+                  }}
+                  className="px-4 py-2 rounded-xl text-xs font-bold bg-indigo-600 hover:bg-indigo-700 text-white flex items-center gap-1.5 transition-colors cursor-pointer shadow-xs"
+                >
+                  <span>Next Process</span>
+                  <ArrowRight className="w-3.5 h-3.5" />
+                </button>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };
