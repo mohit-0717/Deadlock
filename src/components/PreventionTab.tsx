@@ -474,7 +474,7 @@ export const PreventionTab: React.FC<PreventionTabProps> = () => {
             </div>
 
             <p className="text-[11px] text-slate-600 leading-relaxed font-sans">
-              <strong>Viva Defense Note:</strong> These preset figures represent theoretical trade-offs described in Operating Systems textbooks. Percentage utilization, active thread count, and scheduling wait ticks have different physical units. They are separated into distinct charts below (or normalized to a common 0–100% relative index) so disparate units are never falsely plotted on the same scale.
+              <strong>Note:</strong> These preset figures represent theoretical trade-offs described in Operating Systems textbooks. Percentage utilization, active thread count, and scheduling wait ticks have different physical units. They are separated into distinct charts below (or normalized to a common 0–100% relative index) so disparate units are never falsely plotted on the same scale.
             </p>
 
             <div className="grid grid-cols-1 md:grid-cols-3 gap-2.5 text-[11px] font-sans pt-1">
