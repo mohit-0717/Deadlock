@@ -158,11 +158,18 @@ export const AvoidanceTab: React.FC<AvoidanceTabProps> = ({
     }
 
     const newNeed = computeNeed(newMax, newAlloc);
+    const newTotal = systemState.totalInstances ? [...systemState.totalInstances] : undefined;
+    if (newTotal && matrixType === 'allocation') {
+      const colSum = newAlloc.reduce((sum, row) => sum + (row[rIdx] || 0), 0);
+      newTotal[rIdx] = colSum + (systemState.available[rIdx] || 0);
+    }
+
     const updatedState: SystemState = {
       ...systemState,
       allocation: newAlloc,
       max: newMax,
       need: newNeed,
+      totalInstances: newTotal,
     };
 
     const valResult = validateSetup(updatedState);
@@ -177,9 +184,16 @@ export const AvoidanceTab: React.FC<AvoidanceTabProps> = ({
     const newAvail = [...systemState.available];
     newAvail[rIdx] = num;
 
+    const colAlloc = systemState.allocation.reduce((sum, row) => sum + (row[rIdx] || 0), 0);
+    const newTotal = systemState.totalInstances ? [...systemState.totalInstances] : undefined;
+    if (newTotal) {
+      newTotal[rIdx] = num + colAlloc;
+    }
+
     const updatedState: SystemState = {
       ...systemState,
       available: newAvail,
+      totalInstances: newTotal,
     };
 
     const valResult = validateSetup(updatedState);
@@ -400,6 +414,54 @@ export const AvoidanceTab: React.FC<AvoidanceTabProps> = ({
             >
               3. Unsafe (Rollback)
             </button>
+          </div>
+        </div>
+      </div>
+
+      {/* Dedicated Prominent Available Vector Card */}
+      <div className="bg-white rounded-xl border border-slate-200 p-4 sm:p-5 shadow-2xs">
+        <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+          <div>
+            <div className="flex items-center gap-2">
+              <span className="w-2.5 h-2.5 rounded-full bg-emerald-500 animate-pulse" />
+              <h3 className="text-sm font-bold text-slate-800">
+                Available Vector (Free Resource Pool)
+              </h3>
+              <span className="text-[11px] font-semibold px-2 py-0.5 rounded bg-emerald-50 text-emerald-800 border border-emerald-200">
+                Work starts here
+              </span>
+            </div>
+            <p className="text-xs text-slate-500 mt-1">
+              The number of currently unallocated instances. You can type new values directly into the boxes below at any time:
+            </p>
+          </div>
+
+          <div className="flex items-center gap-2.5 flex-wrap">
+            {systemState.resourceNames.map((rName, rIdx) => {
+              const avail = systemState.available[rIdx] ?? 0;
+              const allocated = totalAllocated[rIdx] ?? 0;
+              const total = avail + allocated;
+
+              return (
+                <div
+                  key={rName}
+                  className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-emerald-50/70 border border-emerald-200 text-xs shadow-2xs"
+                >
+                  <span className="font-bold text-emerald-950 font-mono text-sm">{rName}:</span>
+                  <input
+                    type="number"
+                    min={0}
+                    value={avail}
+                    onChange={(e) => handleAvailableCellChange(rIdx, e.target.value)}
+                    className="w-12 h-7 text-center bg-white border border-emerald-300 rounded font-bold text-emerald-950 text-sm focus:ring-2 focus:ring-emerald-500 focus:outline-none"
+                    title={`Free available instances of resource ${rName}`}
+                  />
+                  <span className="text-[10px] text-emerald-700 font-sans">
+                    (Alloc: {allocated}, Tot: {total})
+                  </span>
+                </div>
+              );
+            })}
           </div>
         </div>
       </div>
@@ -708,23 +770,30 @@ export const AvoidanceTab: React.FC<AvoidanceTabProps> = ({
                 );
               })}
             </tbody>
-            {/* Table Footer: Available Pool */}
+            {/* Table Footer: Column Totals & Available Pool */}
             <tfoot>
+              {/* Row 1: Total Allocated */}
               <tr className="border-t-2 border-slate-200 bg-slate-50 font-mono text-xs">
-                <td className="py-3 px-4 font-sans font-bold text-slate-800 text-left">
-                  Available
+                <td className="py-2.5 px-4 font-sans font-bold text-slate-700 text-left">
+                  Total Allocated
                 </td>
-                {/* Total Allocated */}
                 {totalAllocated.map((total, rIdx) => (
-                  <td key={`total-alloc-${rIdx}`} className="py-3 px-2 text-center border-l border-slate-200 text-slate-500 text-xs">
-                    (Tot: {total})
+                  <td key={`total-alloc-${rIdx}`} className="py-2.5 px-2 text-center border-l border-slate-200 text-blue-900 font-bold bg-blue-50/40">
+                    {total}
                   </td>
                 ))}
-                {/* Empty max spacer */}
-                <td colSpan={systemState.resourceCount} className="border-l border-slate-200 bg-slate-50/50"></td>
-                {/* Available Pool Values */}
+                <td colSpan={systemState.resourceCount * 2 + 1} className="py-2.5 px-4 text-left border-l border-slate-200 text-slate-500 font-sans text-xs">
+                  Sum of resources currently held across all processes
+                </td>
+              </tr>
+              {/* Row 2: Available Pool */}
+              <tr className="border-t border-slate-200 bg-emerald-50/40 font-mono text-xs">
+                <td className="py-3 px-4 font-sans font-bold text-emerald-950 text-left flex items-center gap-1.5">
+                  <span className="w-2 h-2 rounded-full bg-emerald-600" />
+                  <span>Available Pool</span>
+                </td>
                 {systemState.available.map((avail, rIdx) => (
-                  <td key={`avail-${rIdx}`} className="py-3 px-2 text-center border-l border-slate-200 font-extrabold text-emerald-700 bg-emerald-50/60 text-sm">
+                  <td key={`avail-cell-${rIdx}`} className="py-3 px-2 text-center border-l border-emerald-200 font-extrabold text-emerald-950 bg-emerald-100/60 text-sm">
                     {isEditMode ? (
                       <input
                         type="number"
@@ -732,15 +801,15 @@ export const AvoidanceTab: React.FC<AvoidanceTabProps> = ({
                         value={avail}
                         onChange={(e) => handleAvailableCellChange(rIdx, e.target.value)}
                         onClick={(e) => e.stopPropagation()}
-                        className="w-10 h-6 text-center bg-white border border-emerald-400 rounded text-emerald-950 font-bold"
+                        className="w-10 h-6 text-center bg-white border border-emerald-500 rounded text-emerald-950 font-bold shadow-2xs"
                       />
                     ) : (
                       avail
                     )}
                   </td>
                 ))}
-                <td className="py-3 px-4 text-center border-l border-slate-200 font-sans text-xs text-slate-500 font-medium">
-                  Free instances available
+                <td colSpan={systemState.resourceCount * 2 + 1} className="py-3 px-4 text-left border-l border-emerald-200 font-sans text-xs text-emerald-900">
+                  <span className="font-semibold">Work starts at: [{systemState.available.join(', ')}]</span> &bull; Free instances available for execution
                 </td>
               </tr>
             </tfoot>
