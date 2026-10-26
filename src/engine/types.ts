@@ -153,6 +153,7 @@ export interface PreventionSimulationResult {
   starvationRisk: 'None' | 'Low' | 'Medium' | 'High';
   description: string;
   eliminatedCondition: string;
+  deadlockStatusLabel?: string;
   pros: string[];
   cons: string[];
 }

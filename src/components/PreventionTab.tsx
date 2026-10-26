@@ -179,8 +179,10 @@ export const PreventionTab: React.FC<PreventionTabProps> = () => {
           </div>
 
           <div className="p-3 bg-slate-50 text-xs font-mono text-slate-600 border-t border-slate-200 flex items-center justify-between">
-            <span>Circular wait is precluded.</span>
-            <span className="text-emerald-700 font-bold">Deadlock Risk: 0%</span>
+            <span>Coffman Condition #4 (Circular Wait) eliminated.</span>
+            <span className="text-emerald-700 font-bold bg-emerald-50 px-2 py-0.5 rounded border border-emerald-200">
+              Circular wait eliminated
+            </span>
           </div>
         </div>
 
@@ -267,8 +269,10 @@ export const PreventionTab: React.FC<PreventionTabProps> = () => {
           </div>
 
           <div className="p-3 bg-slate-50 text-xs font-mono text-slate-600 border-t border-slate-200 flex items-center justify-between">
-            <span>Process holds zero resources while waiting.</span>
-            <span className="text-emerald-700 font-bold">Deadlock Risk: 0%</span>
+            <span>Coffman Condition #2 (Hold and Wait) eliminated.</span>
+            <span className="text-emerald-700 font-bold bg-emerald-50 px-2 py-0.5 rounded border border-emerald-200">
+              Hold-and-wait eliminated
+            </span>
           </div>
         </div>
       </div>
@@ -282,18 +286,73 @@ export const PreventionTab: React.FC<PreventionTabProps> = () => {
               Prevention Trade-Offs (Utilization vs Concurrency)
             </h4>
           </div>
+          <span className="text-xs text-slate-500 font-mono hidden sm:inline">
+            Dual-Axis Scale Normalization
+          </span>
         </div>
 
         <div className="p-4 space-y-4">
-          <div className="h-60 w-full">
+          {/* Units and Normalization Scale Callout */}
+          <div className="p-3.5 rounded-lg bg-slate-50 border border-slate-200 text-xs text-slate-700 space-y-2">
+            <div className="flex items-center justify-between flex-wrap gap-2">
+              <span className="font-bold text-slate-900 text-xs">
+                Metric Normalization &amp; Units Scale:
+              </span>
+              <span className="text-[11px] text-slate-500 font-mono">
+                Comparative OS Simulation Data
+              </span>
+            </div>
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-2.5 text-[11px] font-sans">
+              <div className="p-2 rounded-md bg-white border border-slate-200 flex items-start gap-2 shadow-2xs">
+                <span className="w-3 h-3 rounded bg-indigo-600 shrink-0 mt-0.5" />
+                <div>
+                  <strong className="text-slate-900 block font-semibold">Resource Utilization (%)</strong>
+                  <span className="text-slate-500">Left Axis &bull; 0% &ndash; 100% capacity in active use (higher is better).</span>
+                </div>
+              </div>
+              <div className="p-2 rounded-md bg-white border border-slate-200 flex items-start gap-2 shadow-2xs">
+                <span className="w-3 h-3 rounded bg-emerald-600 shrink-0 mt-0.5" />
+                <div>
+                  <strong className="text-slate-900 block font-semibold">Avg Concurrency Level</strong>
+                  <span className="text-slate-500">Right Axis &bull; 0 &ndash; 5 active simultaneous threads/processes.</span>
+                </div>
+              </div>
+              <div className="p-2 rounded-md bg-white border border-slate-200 flex items-start gap-2 shadow-2xs">
+                <span className="w-3 h-3 rounded bg-amber-500 shrink-0 mt-0.5" />
+                <div>
+                  <strong className="text-slate-900 block font-semibold">Average Wait Latency</strong>
+                  <span className="text-slate-500">Right Axis &bull; 0 &ndash; 10 scheduling delay ticks (lower is better).</span>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div className="h-64 w-full">
             <ResponsiveContainer width="100%" height="100%">
               <BarChart
                 data={chartData}
-                margin={{ top: 10, right: 15, left: -15, bottom: 0 }}
+                margin={{ top: 10, right: 35, left: -5, bottom: 0 }}
               >
                 <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
                 <XAxis dataKey="name" stroke="#64748b" fontSize={12} />
-                <YAxis stroke="#64748b" fontSize={12} />
+                {/* Left Axis: Utilization (0 - 100%) */}
+                <YAxis
+                  yAxisId="left"
+                  stroke="#4f46e5"
+                  fontSize={11}
+                  domain={[0, 100]}
+                  tickFormatter={(val) => `${val}%`}
+                  label={{ value: 'Utilization (%)', angle: -90, position: 'insideLeft', offset: 14, fontSize: 10, fill: '#4f46e5' }}
+                />
+                {/* Right Axis: Absolute Scale (0 - 10 Units) for Concurrency & Wait Latency */}
+                <YAxis
+                  yAxisId="right"
+                  orientation="right"
+                  stroke="#64748b"
+                  fontSize={11}
+                  domain={[0, 10]}
+                  label={{ value: 'Units (Processes / Ticks)', angle: 90, position: 'insideRight', offset: 14, fontSize: 10, fill: '#64748b' }}
+                />
                 <Tooltip
                   contentStyle={{
                     backgroundColor: '#ffffff',
@@ -301,50 +360,86 @@ export const PreventionTab: React.FC<PreventionTabProps> = () => {
                     borderRadius: '0.5rem',
                     fontSize: '12px',
                   }}
+                  formatter={(value: any, name?: any) => {
+                    const n = String(name || '');
+                    if (n.includes('Utilization')) return [`${value}%`, 'Resource Utilization'];
+                    if (n.includes('Concurrency')) return [`${value} active processes (0–5 scale)`, 'Avg Concurrency Level'];
+                    if (n.includes('Wait Latency')) return [`${value} time units / ticks (0–10 scale)`, 'Average Wait Latency'];
+                    return [value, n];
+                  }}
                 />
-                <Legend wrapperStyle={{ fontSize: '12px', paddingTop: '6px' }} />
-                <Bar dataKey="utilization" name="Resource Utilization %" fill="#4f46e5" radius={[4, 4, 0, 0]} />
-                <Bar dataKey="concurrency" name="Avg Concurrency Degree" fill="#10b981" radius={[4, 4, 0, 0]} />
-                <Bar dataKey="waitTime" name="Wait Latency" fill="#f59e0b" radius={[4, 4, 0, 0]} />
+                <Legend wrapperStyle={{ fontSize: '11px', paddingTop: '8px' }} />
+                <Bar
+                  yAxisId="left"
+                  dataKey="utilization"
+                  name="Resource Utilization (%) [Left Axis: 0–100%]"
+                  fill="#4f46e5"
+                  radius={[4, 4, 0, 0]}
+                />
+                <Bar
+                  yAxisId="right"
+                  dataKey="concurrency"
+                  name="Avg Concurrency (Processes) [Right Axis: 0–5]"
+                  fill="#10b981"
+                  radius={[4, 4, 0, 0]}
+                />
+                <Bar
+                  yAxisId="right"
+                  dataKey="waitTime"
+                  name="Wait Latency (Time Units) [Right Axis: 0–10]"
+                  fill="#f59e0b"
+                  radius={[4, 4, 0, 0]}
+                />
               </BarChart>
             </ResponsiveContainer>
           </div>
 
           {/* Analysis Cards */}
           <div className="grid grid-cols-1 md:grid-cols-3 gap-3.5 pt-2">
-            {metrics.map((m) => (
-              <div
-                key={m.policy}
-                className="p-3.5 rounded-lg bg-slate-50 border border-slate-200 space-y-2 text-xs flex flex-col justify-between"
-              >
-                <div>
-                  <div className="flex items-center justify-between mb-1.5">
-                    <span className="font-bold text-slate-900 text-sm">{m.name}</span>
-                    <span className="text-[11px] font-bold text-emerald-800 bg-emerald-50 px-2 py-0.5 rounded border border-emerald-300">
-                      0% Deadlock
-                    </span>
+            {metrics.map((m) => {
+              const isNoPrev = m.policy === 'standard';
+              const label = m.deadlockStatusLabel || (isNoPrev ? 'Deadlock possible' : 'Deadlock eliminated');
+
+              return (
+                <div
+                  key={m.policy}
+                  className="p-3.5 rounded-lg bg-slate-50 border border-slate-200 space-y-2 text-xs flex flex-col justify-between"
+                >
+                  <div>
+                    <div className="flex items-center justify-between mb-1.5 gap-2">
+                      <span className="font-bold text-slate-900 text-sm">{m.name}</span>
+                      <span
+                        className={`text-[11px] font-bold px-2 py-0.5 rounded border whitespace-nowrap ${
+                          isNoPrev
+                            ? 'text-rose-800 bg-rose-50 border-rose-300'
+                            : 'text-emerald-800 bg-emerald-50 border-emerald-300'
+                        }`}
+                      >
+                        {label}
+                      </span>
+                    </div>
+
+                    <p className="text-xs text-slate-600 mb-2 leading-relaxed">{m.description}</p>
+
+                    <div className="space-y-1 text-xs">
+                      <div className="flex justify-between text-slate-700">
+                        <span className="text-slate-500">Eliminates:</span>
+                        <span className="font-semibold text-indigo-700">{m.eliminatedCondition}</span>
+                      </div>
+                      <div className="flex justify-between text-slate-700">
+                        <span className="text-slate-500">Starvation Risk:</span>
+                        <span className="font-bold text-slate-800">{m.starvationRisk}</span>
+                      </div>
+                    </div>
                   </div>
 
-                  <p className="text-xs text-slate-600 mb-2 leading-relaxed">{m.description}</p>
-
-                  <div className="space-y-1 text-xs">
-                    <div className="flex justify-between text-slate-700">
-                      <span className="text-slate-500">Eliminates:</span>
-                      <span className="font-semibold text-indigo-700">{m.eliminatedCondition}</span>
-                    </div>
-                    <div className="flex justify-between text-slate-700">
-                      <span className="text-slate-500">Starvation Risk:</span>
-                      <span className="font-bold text-slate-800">{m.starvationRisk}</span>
-                    </div>
+                  <div className="pt-2 border-t border-slate-200 space-y-0.5 text-xs text-slate-600">
+                    <div>&bull; <strong>Pro:</strong> {m.pros[0]}</div>
+                    <div>&bull; <strong>Con:</strong> {m.cons[0]}</div>
                   </div>
                 </div>
-
-                <div className="pt-2 border-t border-slate-200 space-y-0.5 text-xs text-slate-600">
-                  <div>&bull; <strong>Pro:</strong> {m.pros[0]}</div>
-                  <div>&bull; <strong>Con:</strong> {m.cons[0]}</div>
-                </div>
-              </div>
-            ))}
+              );
+            })}
           </div>
         </div>
       </div>
