@@ -83,6 +83,8 @@ export const AvoidanceTab: React.FC<AvoidanceTabProps> = ({
     safeSequenceSoFar: string[];
     isFinalStep: boolean;
     isSystemSafe: boolean;
+    haltReason?: string;
+    stuckProcessNames?: string[];
   } | null>(null);
 
   // Compute live RAG graph directly from Banker's current state
@@ -154,6 +156,7 @@ export const AvoidanceTab: React.FC<AvoidanceTabProps> = ({
       if (onStatusChange) {
         onStatusChange('UNSAFE');
       }
+      const stuckNames = activeRes.stuckProcesses ? activeRes.stuckProcesses.map((p) => p.processName) : [];
       setStepPopup({
         isOpen: true,
         stepNumber: 0,
@@ -166,6 +169,8 @@ export const AvoidanceTab: React.FC<AvoidanceTabProps> = ({
         safeSequenceSoFar: [],
         isFinalStep: true,
         isSystemSafe: false,
+        haltReason: 'No process has Need ≤ Available Work. The system is immediately in an UNSAFE state.',
+        stuckProcessNames: stuckNames,
       });
       return;
     }
@@ -181,6 +186,20 @@ export const AvoidanceTab: React.FC<AvoidanceTabProps> = ({
         onStatusChange(activeRes.status);
       }
 
+      const stuckNames = activeRes.stuckProcesses ? activeRes.stuckProcesses.map((p) => p.processName) : [];
+      let haltReason = '';
+      if (isFinal && !activeRes.isSafe) {
+        if (activeRes.stuckProcesses && activeRes.stuckProcesses.length > 0) {
+          const stuck = activeRes.stuckProcesses[0];
+          const deficitList = stuck.failingResources
+            .map((f) => `Resource ${f.resourceName} (Need ${f.needAmount} > Work ${f.workAmount})`)
+            .join(', ');
+          haltReason = `Process ${stuck.processName} cannot execute because its Need exceeds available Work for ${deficitList}. With no remaining process able to finish, the system halts in an Unsafe state.`;
+        } else {
+          haltReason = activeRes.explanation || 'Remaining process(es) have Need > Work. No further process can proceed, leaving the system in an Unsafe state.';
+        }
+      }
+
       setStepPopup({
         isOpen: true,
         stepNumber: nextIndex + 1,
@@ -193,6 +212,8 @@ export const AvoidanceTab: React.FC<AvoidanceTabProps> = ({
         safeSequenceSoFar: seqSoFar,
         isFinalStep: isFinal,
         isSystemSafe: activeRes.isSafe,
+        haltReason,
+        stuckProcessNames: stuckNames,
       });
     }
   };
@@ -1243,6 +1264,25 @@ export const AvoidanceTab: React.FC<AvoidanceTabProps> = ({
                   &lt; {verifiedSequenceSoFar.join(' → ')} &gt;
                 </span>
               </div>
+
+              {currentStepIndex + 1 === safetyResult.steps.length && !safetyResult.isSafe && (
+                <div className="mt-2.5 p-3 rounded-lg bg-rose-50 border border-rose-300 text-xs text-rose-950 space-y-1 shadow-2xs">
+                  <div className="flex items-center gap-1.5 font-bold text-rose-800">
+                    <AlertTriangle className="w-3.5 h-3.5 text-rose-600 shrink-0" />
+                    <span>
+                      Algorithm Halted: System is in an UNSAFE State{' '}
+                      {safetyResult.stuckProcesses && safetyResult.stuckProcesses.length > 0
+                        ? `(Halted Process: ${safetyResult.stuckProcesses.map((p) => p.processName).join(', ')})`
+                        : ''}
+                    </span>
+                  </div>
+                  <p className="text-[11px] text-slate-700 leading-relaxed font-sans">
+                    <strong>Reason:</strong>{' '}
+                    {safetyResult.explanation ||
+                      'Remaining process(es) have Need > Work. No further process can proceed, halting the safety algorithm.'}
+                  </p>
+                </div>
+              )}
             </div>
           )}
 
@@ -1666,6 +1706,25 @@ export const AvoidanceTab: React.FC<AvoidanceTabProps> = ({
                 <div className="p-3 rounded-xl bg-emerald-100/60 border border-emerald-300 text-emerald-950 text-xs font-semibold flex items-center gap-2">
                   <Sparkles className="w-4 h-4 text-emerald-700 shrink-0" />
                   <span>All processes safely executed. The system is verified deadlock-free!</span>
+                </div>
+              )}
+
+              {stepPopup.isFinalStep && !stepPopup.isSystemSafe && (
+                <div className="p-3.5 rounded-xl bg-rose-50 border border-rose-300 text-rose-950 text-xs space-y-1.5 shadow-2xs">
+                  <div className="flex items-center gap-2 font-bold text-rose-800">
+                    <AlertTriangle className="w-4 h-4 text-rose-600 shrink-0" />
+                    <span>
+                      State: Halted in UNSAFE State{' '}
+                      {stepPopup.stuckProcessNames && stepPopup.stuckProcessNames.length > 0
+                        ? `(Halted Process: ${stepPopup.stuckProcessNames.join(', ')})`
+                        : ''}
+                    </span>
+                  </div>
+                  <p className="text-slate-700 leading-relaxed font-sans">
+                    <strong>Reason:</strong>{' '}
+                    {stepPopup.haltReason ||
+                      'Remaining process(es) have Need > Work. No further process can proceed, leaving the system in an Unsafe state.'}
+                  </p>
                 </div>
               )}
             </div>
