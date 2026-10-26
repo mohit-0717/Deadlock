@@ -9,6 +9,7 @@ export interface ValidationIssue {
   field: string;
   message: string;
   severity: 'error' | 'warning';
+  code?: string;
 }
 
 export interface ValidationResult {
@@ -149,12 +150,14 @@ export function validateSetup(state: Partial<SystemState>): ValidationResult {
             field: `totalInstances[${j}]`,
             message: `Resource '${rName}': Total allocated (${colSumAlloc}) exceeds system total capacity (${total})`,
             severity: 'error',
+            code: 'SETUP_TOTAL_LT_ALLOCATED',
           });
-        } else if (typeof avail[j] === 'number' && colSumAlloc + avail[j] !== total) {
+        } else if (state.accountingMode === 'total_instances' && typeof avail[j] === 'number' && colSumAlloc + avail[j] !== total) {
           issues.push({
             field: `totalInstances[${j}]`,
             message: `Resource '${rName}' accounting mismatch: Allocated (${colSumAlloc}) + Available (${avail[j]}) != Total (${total})`,
             severity: 'warning',
+            code: 'SETUP_AVAILABLE_MISMATCH',
           });
         }
       }
@@ -167,6 +170,13 @@ export function validateSetup(state: Partial<SystemState>): ValidationResult {
   };
 }
 
+export interface RequestFormatValidationResult {
+  isValid: boolean;
+  error?: string;
+  failingResource?: string;
+  failingIndex?: number;
+}
+
 /**
  * Checks if a resource request vector is structurally valid.
  */
@@ -174,8 +184,9 @@ export function validateRequestFormat(
   processId: number,
   request: number[],
   processCount: number,
-  resourceCount: number
-): { isValid: boolean; error?: string } {
+  resourceCount: number,
+  resourceNames?: string[]
+): RequestFormatValidationResult {
   if (typeof processId !== 'number' || !Number.isInteger(processId) || processId < 0 || processId >= processCount) {
     return {
       isValid: false,
@@ -192,16 +203,21 @@ export function validateRequestFormat(
 
   for (let j = 0; j < resourceCount; j++) {
     const val = request[j];
+    const rName = resourceNames?.[j] || String.fromCharCode(65 + j);
     if (typeof val !== 'number' || isNaN(val) || !Number.isInteger(val)) {
       return {
         isValid: false,
-        error: `Request index ${j} contains non-integer or NaN value: ${val}.`,
+        error: `Invalid request: Resource ${rName} must be an integer (received ${val}).`,
+        failingResource: rName,
+        failingIndex: j,
       };
     }
     if (val < 0) {
       return {
         isValid: false,
-        error: `Negative request value detected at resource ${j} (${val}). Requests cannot be negative.`,
+        error: `Invalid request: Resource ${rName} cannot have a negative requested quantity (${val}).`,
+        failingResource: rName,
+        failingIndex: j,
       };
     }
   }

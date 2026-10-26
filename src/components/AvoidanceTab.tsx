@@ -18,6 +18,7 @@ import {
   Calculator,
   X,
   Sparkles,
+  RefreshCw,
 } from 'lucide-react';
 import { RequestHandlingResult, SafetyResult, SystemState, SystemStatus } from '../engine/types.js';
 import { computeNeed, requestResource, safetyCheck } from '../engine/bankers.js';
@@ -25,6 +26,7 @@ import { getScenarioA } from '../engine/scenarios.js';
 import { validateSetup, ValidationIssue } from '../engine/validation.js';
 import { RAGGraphView } from './RAGGraphView.js';
 import { buildRAG } from '../engine/detection.js';
+import { CheckStatusBadge } from './StatusBadge.js';
 
 interface AvoidanceTabProps {
   systemState: SystemState;
@@ -60,6 +62,13 @@ export const AvoidanceTab: React.FC<AvoidanceTabProps> = ({
   const [validationErrors, setValidationErrors] = useState<ValidationIssue[]>([]);
   // Tracks whether the safety algorithm has been executed for the current matrices
   const [isSafetyEvaluated, setIsSafetyEvaluated] = useState<boolean>(true);
+  const [isAnalysisStale, setIsAnalysisStale] = useState<boolean>(false);
+  const [showResetConfirm, setShowResetConfirm] = useState<boolean>(false);
+
+  // Accounting Mode: 'available_direct' (Exam/Direct) vs 'total_instances' (Capacity)
+  const [accountingMode, setAccountingMode] = useState<'available_direct' | 'total_instances'>(
+    () => systemState.accountingMode || 'available_direct'
+  );
 
   // Step pop-up modal state
   const [stepPopup, setStepPopup] = useState<{
@@ -130,13 +139,14 @@ export const AvoidanceTab: React.FC<AvoidanceTabProps> = ({
     );
     setSafetyResult(res);
     setIsSafetyEvaluated(true);
+    setIsAnalysisStale(false);
     return res;
   };
 
   // Step forward: executes exactly ONE process, updates trace, sequence, and opens popup!
   const stepForward = () => {
     let activeRes = safetyResult;
-    if (!isSafetyEvaluated) {
+    if (!isSafetyEvaluated || isAnalysisStale) {
       activeRes = runSafetyEvaluation();
     }
 
@@ -237,10 +247,39 @@ export const AvoidanceTab: React.FC<AvoidanceTabProps> = ({
     }
 
     const newNeed = computeNeed(newMax, newAlloc);
-    const newTotal = systemState.totalInstances ? [...systemState.totalInstances] : undefined;
-    if (newTotal && matrixType === 'allocation') {
-      const colSum = newAlloc.reduce((sum, row) => sum + (row[rIdx] || 0), 0);
-      newTotal[rIdx] = colSum + (systemState.available[rIdx] || 0);
+    const colAlloc = newAlloc.reduce((sum, row) => sum + (row[rIdx] || 0), 0);
+    const newTotal = systemState.totalInstances
+      ? [...systemState.totalInstances]
+      : systemState.available.map((a, i) => a + (totalAllocated[i] || 0));
+
+    if (accountingMode === 'total_instances') {
+      // In total_instances mode, total is fixed; Available = Total - Allocated
+      const tot = newTotal[rIdx] ?? (colAlloc + (systemState.available[rIdx] || 0));
+      const newAvail = [...systemState.available];
+      newAvail[rIdx] = Math.max(0, tot - colAlloc);
+      const updatedState: SystemState = {
+        ...systemState,
+        allocation: newAlloc,
+        max: newMax,
+        need: newNeed,
+        available: newAvail,
+        totalInstances: newTotal,
+        accountingMode,
+      };
+      const valResult = validateSetup(updatedState);
+      setValidationErrors(valResult.issues);
+      setIsSafetyEvaluated(false);
+      setIsAnalysisStale(true);
+      setLastRequestResult(null);
+      setCurrentStepIndex(-1);
+      if (onStatusChange) onStatusChange('ANALYSIS_OUT_OF_DATE');
+      onStateChange(updatedState);
+      return;
+    }
+
+    // In available_direct mode, Available is fixed; Total = Allocated + Available
+    if (matrixType === 'allocation') {
+      newTotal[rIdx] = colAlloc + (systemState.available[rIdx] || 0);
     }
 
     const updatedState: SystemState = {
@@ -249,17 +288,20 @@ export const AvoidanceTab: React.FC<AvoidanceTabProps> = ({
       max: newMax,
       need: newNeed,
       totalInstances: newTotal,
+      accountingMode,
     };
 
     const valResult = validateSetup(updatedState);
     setValidationErrors(valResult.issues);
     setIsSafetyEvaluated(false);
+    setIsAnalysisStale(true);
     setLastRequestResult(null);
     setCurrentStepIndex(-1);
+    if (onStatusChange) onStatusChange('ANALYSIS_OUT_OF_DATE');
     onStateChange(updatedState);
   };
 
-  // Handle available vector edit
+  // Handle available vector edit (Mode 1: Available Directly)
   const handleAvailableCellChange = (rIdx: number, valStr: string) => {
     const val = parseInt(valStr, 10);
     const num = isNaN(val) ? 0 : Math.max(0, val);
@@ -267,22 +309,67 @@ export const AvoidanceTab: React.FC<AvoidanceTabProps> = ({
     newAvail[rIdx] = num;
 
     const colAlloc = systemState.allocation.reduce((sum, row) => sum + (row[rIdx] || 0), 0);
-    const newTotal = systemState.totalInstances ? [...systemState.totalInstances] : undefined;
-    if (newTotal) {
-      newTotal[rIdx] = num + colAlloc;
-    }
+    const newTotal = systemState.totalInstances
+      ? [...systemState.totalInstances]
+      : systemState.available.map((a, i) => a + (totalAllocated[i] || 0));
+    newTotal[rIdx] = num + colAlloc;
 
     const updatedState: SystemState = {
       ...systemState,
       available: newAvail,
       totalInstances: newTotal,
+      accountingMode: 'available_direct',
     };
 
     const valResult = validateSetup(updatedState);
     setValidationErrors(valResult.issues);
     setIsSafetyEvaluated(false);
+    setIsAnalysisStale(true);
     setLastRequestResult(null);
     setCurrentStepIndex(-1);
+    if (onStatusChange) onStatusChange('ANALYSIS_OUT_OF_DATE');
+    onStateChange(updatedState);
+  };
+
+  // Handle total instances edit (Mode 2: Total Instances)
+  const handleTotalInstanceCellChange = (rIdx: number, valStr: string) => {
+    const val = parseInt(valStr, 10);
+    const num = isNaN(val) ? 0 : Math.max(0, val);
+    const newTotals = systemState.totalInstances
+      ? [...systemState.totalInstances]
+      : systemState.available.map((a, i) => a + (totalAllocated[i] || 0));
+    newTotals[rIdx] = num;
+
+    const colAlloc = systemState.allocation.reduce((sum, row) => sum + (row[rIdx] || 0), 0);
+    const newAvail = [...systemState.available];
+    newAvail[rIdx] = Math.max(0, num - colAlloc);
+
+    const updatedState: SystemState = {
+      ...systemState,
+      available: newAvail,
+      totalInstances: newTotals,
+      accountingMode: 'total_instances',
+    };
+
+    const valResult = validateSetup(updatedState);
+    setValidationErrors(valResult.issues);
+    setIsSafetyEvaluated(false);
+    setIsAnalysisStale(true);
+    setLastRequestResult(null);
+    setCurrentStepIndex(-1);
+    if (onStatusChange) onStatusChange('ANALYSIS_OUT_OF_DATE');
+    onStateChange(updatedState);
+  };
+
+  // Switch between Mode 1 (Available Directly) and Mode 2 (Total Instances)
+  const handleSwitchAccountingMode = (mode: 'available_direct' | 'total_instances') => {
+    setAccountingMode(mode);
+    const updatedState: SystemState = {
+      ...systemState,
+      accountingMode: mode,
+    };
+    const valResult = validateSetup(updatedState);
+    setValidationErrors(valResult.issues);
     onStateChange(updatedState);
   };
 
@@ -290,6 +377,7 @@ export const AvoidanceTab: React.FC<AvoidanceTabProps> = ({
   const loadScenario = (type: 'A' | 'B' | 'C') => {
     setLastRequestResult(null);
     setIsEditMode(false);
+    setIsAnalysisStale(false);
     resetSteps();
 
     let targetState = getScenarioA();
@@ -372,12 +460,15 @@ export const AvoidanceTab: React.FC<AvoidanceTabProps> = ({
       allocation: newAlloc,
       max: newMax,
       need: newNeed,
+      accountingMode,
     };
     const valResult = validateSetup(updatedState);
     setValidationErrors(valResult.issues);
     setIsSafetyEvaluated(false);
+    setIsAnalysisStale(true);
     setLastRequestResult(null);
     setCurrentStepIndex(-1);
+    if (onStatusChange) onStatusChange('ANALYSIS_OUT_OF_DATE');
     onStateChange(updatedState);
   };
 
@@ -396,6 +487,7 @@ export const AvoidanceTab: React.FC<AvoidanceTabProps> = ({
       allocation: newAlloc,
       max: newMax,
       need: newNeed,
+      accountingMode,
     };
     if (selectedProcessId >= newCount) {
       setSelectedProcessId(0);
@@ -403,8 +495,10 @@ export const AvoidanceTab: React.FC<AvoidanceTabProps> = ({
     const valResult = validateSetup(updatedState);
     setValidationErrors(valResult.issues);
     setIsSafetyEvaluated(false);
+    setIsAnalysisStale(true);
     setLastRequestResult(null);
     setCurrentStepIndex(-1);
+    if (onStatusChange) onStatusChange('ANALYSIS_OUT_OF_DATE');
     onStateChange(updatedState);
   };
 
@@ -428,12 +522,15 @@ export const AvoidanceTab: React.FC<AvoidanceTabProps> = ({
       need: newNeed,
       available: newAvail,
       totalInstances: newTotal,
+      accountingMode,
     };
     const valResult = validateSetup(updatedState);
     setValidationErrors(valResult.issues);
     setIsSafetyEvaluated(false);
+    setIsAnalysisStale(true);
     setLastRequestResult(null);
     setCurrentStepIndex(-1);
+    if (onStatusChange) onStatusChange('ANALYSIS_OUT_OF_DATE');
     onStateChange(updatedState);
   };
 
@@ -456,12 +553,15 @@ export const AvoidanceTab: React.FC<AvoidanceTabProps> = ({
       need: newNeed,
       available: newAvail,
       totalInstances: newTotal,
+      accountingMode,
     };
     const valResult = validateSetup(updatedState);
     setValidationErrors(valResult.issues);
     setIsSafetyEvaluated(false);
+    setIsAnalysisStale(true);
     setLastRequestResult(null);
     setCurrentStepIndex(-1);
+    if (onStatusChange) onStatusChange('ANALYSIS_OUT_OF_DATE');
     onStateChange(updatedState);
   };
 
@@ -472,12 +572,15 @@ export const AvoidanceTab: React.FC<AvoidanceTabProps> = ({
       ...systemState,
       available: newAvail,
       totalInstances: parsedTotals,
+      accountingMode: 'total_instances',
     };
     const valResult = validateSetup(updatedState);
     setValidationErrors(valResult.issues);
     setIsSafetyEvaluated(false);
+    setIsAnalysisStale(true);
     setLastRequestResult(null);
     setCurrentStepIndex(-1);
+    if (onStatusChange) onStatusChange('ANALYSIS_OUT_OF_DATE');
     onStateChange(updatedState);
   };
 
@@ -536,19 +639,48 @@ export const AvoidanceTab: React.FC<AvoidanceTabProps> = ({
             <div className="flex items-center gap-2">
               <span className="w-2.5 h-2.5 rounded-full bg-emerald-500 animate-pulse" />
               <h3 className="text-sm font-bold text-slate-800">
-                Available Vector (Free Resource Pool)
+                Resource Accounting &amp; Available Pool
               </h3>
               <span className="text-[11px] font-semibold px-2 py-0.5 rounded bg-emerald-50 text-emerald-800 border border-emerald-200">
                 Work starts here
               </span>
             </div>
             <p className="text-xs text-slate-500 mt-1">
-              The number of currently unallocated instances. You can type new values directly into the boxes below at any time:
+              {accountingMode === 'available_direct'
+                ? 'Mode 1 (Exam Mode): Enter Available directly. Total instances are implied (Total = Allocated + Available).'
+                : 'Mode 2 (Capacity Mode): Enter Total instances. Available pool is calculated (Available = Total - Allocated).'}
             </p>
           </div>
 
-          <div className="flex items-center gap-2.5 flex-wrap">
-            {systemState.resourceNames.map((rName, rIdx) => {
+          {/* Mode Switcher Tabs */}
+          <div className="inline-flex rounded-lg p-1 bg-slate-100 border border-slate-200 shrink-0">
+            <button
+              onClick={() => handleSwitchAccountingMode('available_direct')}
+              className={`px-3 py-1.5 rounded-md text-xs font-semibold transition-all cursor-pointer ${
+                accountingMode === 'available_direct'
+                  ? 'bg-white text-emerald-800 shadow-2xs font-bold'
+                  : 'text-slate-600 hover:text-slate-900'
+              }`}
+            >
+              Mode 1: Available Directly
+            </button>
+            <button
+              onClick={() => handleSwitchAccountingMode('total_instances')}
+              className={`px-3 py-1.5 rounded-md text-xs font-semibold transition-all cursor-pointer ${
+                accountingMode === 'total_instances'
+                  ? 'bg-white text-emerald-800 shadow-2xs font-bold'
+                  : 'text-slate-600 hover:text-slate-900'
+              }`}
+            >
+              Mode 2: Total Instances
+            </button>
+          </div>
+        </div>
+
+        {/* Input Controls */}
+        <div className="mt-4 pt-3 border-t border-slate-100 flex items-center gap-3 flex-wrap">
+          {accountingMode === 'available_direct' ? (
+            systemState.resourceNames.map((rName, rIdx) => {
               const avail = systemState.available[rIdx] ?? 0;
               const allocated = totalAllocated[rIdx] ?? 0;
               const total = avail + allocated;
@@ -564,16 +696,51 @@ export const AvoidanceTab: React.FC<AvoidanceTabProps> = ({
                     min={0}
                     value={avail}
                     onChange={(e) => handleAvailableCellChange(rIdx, e.target.value)}
-                    className="w-12 h-7 text-center bg-white border border-emerald-300 rounded font-bold text-emerald-950 text-sm focus:ring-2 focus:ring-emerald-500 focus:outline-none"
+                    className="w-14 h-7 text-center bg-white border border-emerald-300 rounded font-bold text-emerald-950 text-sm focus:ring-2 focus:ring-emerald-500 focus:outline-none"
                     title={`Free available instances of resource ${rName}`}
                   />
                   <span className="text-[10px] text-emerald-700 font-sans">
-                    (Alloc: {allocated}, Tot: {total})
+                    (Alloc: {allocated}, Implied Tot: {total})
                   </span>
                 </div>
               );
-            })}
-          </div>
+            })
+          ) : (
+            systemState.resourceNames.map((rName, rIdx) => {
+              const allocated = totalAllocated[rIdx] ?? 0;
+              const total = systemState.totalInstances?.[rIdx] ?? (systemState.available[rIdx] + allocated);
+              const avail = systemState.available[rIdx] ?? 0;
+              const isShort = total < allocated;
+
+              return (
+                <div
+                  key={rName}
+                  className={`flex items-center gap-2 px-3 py-1.5 rounded-lg border text-xs shadow-2xs ${
+                    isShort
+                      ? 'bg-rose-50 border-rose-300 text-rose-950'
+                      : 'bg-emerald-50/70 border-emerald-200 text-emerald-950'
+                  }`}
+                >
+                  <span className="font-bold font-mono text-sm">{rName}:</span>
+                  <input
+                    type="number"
+                    min={0}
+                    value={total}
+                    onChange={(e) => handleTotalInstanceCellChange(rIdx, e.target.value)}
+                    className={`w-14 h-7 text-center bg-white border rounded font-bold text-sm focus:ring-2 focus:outline-none ${
+                      isShort
+                        ? 'border-rose-400 text-rose-950 focus:ring-rose-500'
+                        : 'border-emerald-300 text-emerald-950 focus:ring-emerald-500'
+                    }`}
+                    title={`Total instances of resource ${rName}`}
+                  />
+                  <span className={`text-[10px] font-sans ${isShort ? 'text-rose-700 font-bold' : 'text-emerald-700'}`}>
+                    (Alloc: {allocated}, Calc Avail: {avail})
+                  </span>
+                </div>
+              );
+            })
+          )}
         </div>
       </div>
 
@@ -617,7 +784,7 @@ export const AvoidanceTab: React.FC<AvoidanceTabProps> = ({
             </button>
 
             <button
-              onClick={() => loadScenario('A')}
+              onClick={() => setShowResetConfirm(true)}
               className="px-2.5 py-1.5 rounded-lg bg-white hover:bg-slate-100 text-slate-600 border border-slate-300 text-xs font-semibold flex items-center gap-1 transition-colors cursor-pointer"
               title="Reset to default values"
             >
@@ -1000,16 +1167,22 @@ export const AvoidanceTab: React.FC<AvoidanceTabProps> = ({
           </div>
 
           {/* Verified Sequence Banner — updates step-by-step as processes execute */}
-          {!isSafetyEvaluated ? (
-            <div className="p-4 rounded-xl bg-amber-50 border border-amber-200 text-amber-950 space-y-1.5">
-              <div className="flex items-center gap-2">
-                <AlertTriangle className="w-4 h-4 text-amber-600 shrink-0" />
-                <span className="font-bold text-sm text-amber-900">
-                  Matrices Modified &bull; Ready for Step-by-Step Check
+          {isAnalysisStale || !isSafetyEvaluated ? (
+            <div className="p-4 rounded-xl bg-amber-50 border border-amber-300 text-amber-950 space-y-2">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <RefreshCw className="w-4 h-4 text-amber-600 animate-spin" />
+                  <span className="font-bold text-sm text-amber-900">
+                    ANALYSIS OUT OF DATE
+                  </span>
+                </div>
+                <span className="text-[11px] font-bold px-2 py-0.5 rounded bg-amber-100 text-amber-800 border border-amber-300">
+                  Input State Changed
                 </span>
               </div>
               <p className="text-xs text-amber-800 leading-relaxed">
-                Inputs have been edited. Press <strong>&ldquo;Start Step 1&rdquo;</strong> to step through each process one by one.
+                System inputs have been modified since the last check. Previous safe sequence and step trace are cleared.
+                Click <strong>&ldquo;Start Step 1&rdquo;</strong> to recalculate safety on the updated matrices.
               </p>
             </div>
           ) : currentStepIndex < 0 ? (
@@ -1243,7 +1416,7 @@ export const AvoidanceTab: React.FC<AvoidanceTabProps> = ({
                 Banker&apos;s Algorithm Decision:
               </span>
 
-              {lastRequestResult.granted ? (
+              {lastRequestResult.outcome === 'GRANTED' ? (
                 <div className="p-3 rounded-lg bg-emerald-50 border border-emerald-300 text-emerald-950 space-y-1">
                   <div className="flex items-center gap-1.5 font-bold text-emerald-900 text-xs">
                     <CheckCircle2 className="w-4 h-4 text-emerald-600" />
@@ -1253,13 +1426,33 @@ export const AvoidanceTab: React.FC<AvoidanceTabProps> = ({
                     {lastRequestResult.reason}
                   </p>
                 </div>
-              ) : lastRequestResult.status === 'WAITING' ? (
+              ) : lastRequestResult.outcome === 'WAITING' ? (
                 <div className="p-3 rounded-lg bg-amber-50 border border-amber-300 text-amber-950 space-y-1">
                   <div className="flex items-center gap-1.5 font-bold text-amber-900 text-xs">
                     <Clock className="w-4 h-4 text-amber-600" />
-                    <span>PROCESS MUST WAIT</span>
+                    <span>WAITING / DEFERRED</span>
                   </div>
                   <p className="text-xs text-amber-800">
+                    {lastRequestResult.reason}
+                  </p>
+                </div>
+              ) : lastRequestResult.outcome === 'INVALID_INPUT' ? (
+                <div className="p-3 rounded-lg bg-rose-50 border border-rose-300 text-rose-950 space-y-1">
+                  <div className="flex items-center gap-1.5 font-bold text-rose-900 text-xs">
+                    <AlertTriangle className="w-4 h-4 text-rose-600" />
+                    <span>INVALID INPUT</span>
+                  </div>
+                  <p className="text-xs text-rose-800">
+                    {lastRequestResult.reason}
+                  </p>
+                </div>
+              ) : lastRequestResult.outcome === 'INVALID_REQUEST' ? (
+                <div className="p-3 rounded-lg bg-rose-50 border border-rose-300 text-rose-950 space-y-1">
+                  <div className="flex items-center gap-1.5 font-bold text-rose-900 text-xs">
+                    <AlertTriangle className="w-4 h-4 text-rose-600" />
+                    <span>INVALID REQUEST (EXCEEDS NEED)</span>
+                  </div>
+                  <p className="text-xs text-rose-800">
                     {lastRequestResult.reason}
                   </p>
                 </div>
@@ -1267,7 +1460,7 @@ export const AvoidanceTab: React.FC<AvoidanceTabProps> = ({
                 <div className="p-3 rounded-lg bg-rose-50 border border-rose-300 text-rose-950 space-y-1">
                   <div className="flex items-center gap-1.5 font-bold text-rose-900 text-xs">
                     <Undo2 className="w-4 h-4 text-rose-600" />
-                    <span>REQUEST DENIED (ROLLED BACK)</span>
+                    <span>DENIED — UNSAFE (ROLLED BACK)</span>
                   </div>
                   <p className="text-xs text-rose-800">
                     {lastRequestResult.reason}
@@ -1275,31 +1468,109 @@ export const AvoidanceTab: React.FC<AvoidanceTabProps> = ({
                 </div>
               )}
 
-              {/* 3 Verification Checks */}
-              <div className="p-2.5 bg-slate-50 rounded-lg border border-slate-200 text-[11px] space-y-1 font-sans">
-                <div className="flex items-center justify-between">
-                  <span>1. Request &le; Need:</span>
-                  <span className={`font-bold ${lastRequestResult.ruleCode === 'b_exceeds_need' ? 'text-rose-700' : 'text-emerald-700'}`}>
-                    {lastRequestResult.ruleCode === 'b_exceeds_need' ? 'FAILED' : 'PASSED'}
-                  </span>
-                </div>
-                <div className="flex items-center justify-between">
-                  <span>2. Request &le; Available:</span>
-                  <span className={`font-bold ${lastRequestResult.status === 'WAITING' ? 'text-amber-700' : 'text-emerald-700'}`}>
-                    {lastRequestResult.status === 'WAITING' ? 'WAIT (Not enough free)' : 'PASSED'}
-                  </span>
-                </div>
-                <div className="flex items-center justify-between">
-                  <span>3. Tentative Safety Check:</span>
-                  <span className={`font-bold ${lastRequestResult.status === 'UNSAFE' ? 'text-rose-700' : lastRequestResult.status === 'SAFE' ? 'text-emerald-700' : 'SKIPPED'}`}>
-                    {lastRequestResult.status === 'UNSAFE' ? 'UNSAFE (Deny)' : lastRequestResult.status === 'SAFE' ? 'SAFE (Grant)' : 'SKIPPED'}
-                  </span>
+              {/* 4 Verification Stages Table with Badges */}
+              <div className="p-2.5 bg-slate-50 rounded-lg border border-slate-200 text-[11px] space-y-2 font-sans">
+                <span className="font-bold text-slate-700 block text-[11px]">
+                  4 Verification Stages:
+                </span>
+                <div className="space-y-1.5">
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="text-slate-600">1. Format &amp; Bounds:</span>
+                    <CheckStatusBadge
+                      status={lastRequestResult.checks?.format.status || 'NOT_EVALUATED'}
+                      customText={
+                        lastRequestResult.checks?.format.status === 'FAILED'
+                          ? 'FAILED (Negative / Malformed)'
+                          : undefined
+                      }
+                    />
+                  </div>
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="text-slate-600">2. Request &le; Need:</span>
+                    <CheckStatusBadge
+                      status={lastRequestResult.checks?.need.status || 'NOT_EVALUATED'}
+                      customText={
+                        lastRequestResult.checks?.need.status === 'FAILED'
+                          ? 'FAILED (Exceeds Need)'
+                          : undefined
+                      }
+                    />
+                  </div>
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="text-slate-600">3. Request &le; Available:</span>
+                    <CheckStatusBadge
+                      status={lastRequestResult.checks?.available.status || 'NOT_EVALUATED'}
+                      customText={
+                        lastRequestResult.checks?.available.status === 'WAITING'
+                          ? 'WAITING (Insufficient Free Pool)'
+                          : undefined
+                      }
+                    />
+                  </div>
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="text-slate-600">4. Tentative Safety Check:</span>
+                    <CheckStatusBadge
+                      status={lastRequestResult.checks?.safety.status || 'NOT_EVALUATED'}
+                      customText={
+                        lastRequestResult.checks?.safety.status === 'FAILED'
+                          ? 'FAILED (Unsafe State)'
+                          : undefined
+                      }
+                    />
+                  </div>
                 </div>
               </div>
+
+              {/* Explain This Result Callout Box */}
+              {lastRequestResult.explanation && (
+                <div className="p-3 rounded-lg bg-indigo-50/70 border border-indigo-200 text-xs text-indigo-950 space-y-1.5">
+                  <div className="flex items-center gap-1.5 font-bold text-indigo-900 text-xs">
+                    <Info className="w-3.5 h-3.5 text-indigo-600 shrink-0" />
+                    <span>Explain This Result:</span>
+                  </div>
+                  <p className="text-[11px] text-indigo-950 font-sans leading-relaxed whitespace-pre-line">
+                    {lastRequestResult.explanation}
+                  </p>
+                </div>
+              )}
             </div>
           )}
         </div>
       </div>
+
+      {/* Reset Confirmation Modal */}
+      {showResetConfirm && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/40 backdrop-blur-xs animate-fade-in">
+          <div className="bg-white rounded-2xl border border-slate-200 shadow-2xl max-w-sm w-full p-5 space-y-3.5">
+            <div className="flex items-center gap-2.5 text-amber-600 font-bold text-sm">
+              <div className="p-2 rounded-xl bg-amber-100 text-amber-700">
+                <AlertTriangle className="w-5 h-5" />
+              </div>
+              <span className="text-slate-900 font-bold text-base">Reset Matrices to Baseline?</span>
+            </div>
+            <p className="text-xs text-slate-600 leading-relaxed font-sans">
+              This will restore the standard 5-process, 3-resource Silberschatz textbook scenario (Scenario A). All custom matrix edits and request simulation results will be reset.
+            </p>
+            <div className="flex items-center justify-end gap-2 pt-2 border-t border-slate-100">
+              <button
+                onClick={() => setShowResetConfirm(false)}
+                className="px-3.5 py-1.5 rounded-lg text-xs font-semibold text-slate-600 hover:bg-slate-100 cursor-pointer"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={() => {
+                  setShowResetConfirm(false);
+                  loadScenario('A');
+                }}
+                className="px-3.5 py-1.5 rounded-lg text-xs font-bold bg-rose-600 hover:bg-rose-700 text-white shadow-xs cursor-pointer"
+              >
+                Confirm Reset
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Step Execution Pop-up Modal */}
       {stepPopup && stepPopup.isOpen && (

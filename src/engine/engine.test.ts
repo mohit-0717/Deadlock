@@ -557,3 +557,179 @@ test('Test Lab Suite: All test cases TC1 through TC6 pass dynamically', () => {
     assert.equal(tc.passed, true, `${tc.id} should pass`);
   }
 });
+
+// =========================================================================
+// QA & Manual Testing Regression Suite: Priority 1 - 4 Validation Rules
+// =========================================================================
+
+test('QA Audit: Negative request P1 [-1, 0, 0] rejected with INVALID_INPUT & NOT_EVALUATED stages', () => {
+  const base = getScenarioA();
+  const res = requestResource(1, [-1, 0, 0], base);
+
+  assert.equal(res.status, 'INVALID_INPUT');
+  assert.equal(res.outcome, 'INVALID_INPUT');
+  assert.equal(res.granted, false);
+  assert.equal(res.rollbackPerformed, false);
+  assert.ok(res.reason.includes('Resource A') || res.reason.includes('negative'));
+
+  // Stage checks
+  assert.equal(res.checks?.format.status, 'FAILED');
+  assert.equal(res.checks?.need.status, 'NOT_EVALUATED');
+  assert.equal(res.checks?.available.status, 'NOT_EVALUATED');
+  assert.equal(res.checks?.safety.status, 'NOT_EVALUATED');
+
+  // Explanation includes details
+  assert.ok(res.explanation?.includes('negative') || res.explanation?.includes('Resource A'));
+
+  // Original state is preserved
+  assert.deepEqual(res.newState.available, base.available);
+  assert.deepEqual(res.newState.allocation, base.allocation);
+});
+
+test('QA Audit: Request exceeding Need rejected with INVALID_REQUEST & NOT_EVALUATED stages', () => {
+  const base = getScenarioA();
+  // P1 has Need [1, 2, 2]. Request [2, 0, 0] exceeds Need for Resource A.
+  const res = requestResource(1, [2, 0, 0], base);
+
+  assert.equal(res.status, 'INVALID_INPUT');
+  assert.equal(res.outcome, 'INVALID_REQUEST');
+  assert.equal(res.granted, false);
+  assert.equal(res.rollbackPerformed, false);
+  assert.ok(
+    res.reason.includes('Request ≤ Need') ||
+    res.reason.includes('Remaining Need') ||
+    res.explanation?.includes('remaining Need')
+  );
+
+  // Stage checks
+  assert.equal(res.checks?.format.status, 'PASSED');
+  assert.equal(res.checks?.need.status, 'FAILED');
+  assert.equal(res.checks?.available.status, 'NOT_EVALUATED');
+  assert.equal(res.checks?.safety.status, 'NOT_EVALUATED');
+
+  // Base state is completely untouched
+  assert.deepEqual(res.newState.available, base.available);
+  assert.deepEqual(res.newState.allocation, base.allocation);
+});
+
+test('QA Audit: Request exceeding Available yields WAITING with safety NOT_EVALUATED', () => {
+  const base = getScenarioA();
+  // P0 has Need [7, 4, 3]. Request [7, 4, 3] <= Need, but Available is [3, 3, 2].
+  const res = requestResource(0, [7, 4, 3], base);
+
+  assert.equal(res.status, 'WAITING');
+  assert.equal(res.outcome, 'WAITING');
+  assert.equal(res.granted, false);
+  assert.equal(res.rollbackPerformed, false);
+
+  // Stage checks
+  assert.equal(res.checks?.format.status, 'PASSED');
+  assert.equal(res.checks?.need.status, 'PASSED');
+  assert.equal(res.checks?.available.status, 'WAITING');
+  assert.equal(res.checks?.safety.status, 'NOT_EVALUATED');
+
+  assert.deepEqual(res.newState.available, base.available);
+});
+
+test('QA Audit: Safe request P1 [1, 0, 2] is GRANTED with all 4 stages PASSED', () => {
+  const base = getScenarioA();
+  const res = requestResource(1, [1, 0, 2], base);
+
+  assert.equal(res.status, 'SAFE');
+  assert.equal(res.outcome, 'GRANTED');
+  assert.equal(res.granted, true);
+  assert.equal(res.rollbackPerformed, false);
+
+  // All 4 stages must pass
+  assert.equal(res.checks?.format.status, 'PASSED');
+  assert.equal(res.checks?.need.status, 'PASSED');
+  assert.equal(res.checks?.available.status, 'PASSED');
+  assert.equal(res.checks?.safety.status, 'PASSED');
+
+  // Committed state updates
+  assert.deepEqual(res.newState.available, [2, 3, 0]);
+  assert.deepEqual(res.newState.allocation[1], [3, 0, 2]);
+  assert.deepEqual(res.newState.need[1], [0, 2, 0]);
+  assert.ok(res.safetyResult?.isSafe);
+});
+
+test('QA Audit: Unsafe request P0 [0, 0, 2] is DENIED_UNSAFE with rollback & safety FAILED', () => {
+  const base = getScenarioA();
+  const res = requestResource(0, [0, 0, 2], base);
+
+  assert.equal(res.status, 'UNSAFE');
+  assert.equal(res.outcome, 'DENIED_UNSAFE');
+  assert.equal(res.granted, false);
+  assert.equal(res.rollbackPerformed, true);
+
+  // Checks mapping
+  assert.equal(res.checks?.format.status, 'PASSED');
+  assert.equal(res.checks?.need.status, 'PASSED');
+  assert.equal(res.checks?.available.status, 'PASSED');
+  assert.equal(res.checks?.safety.status, 'FAILED');
+
+  // State restored
+  assert.deepEqual(res.newState.available, base.available);
+  assert.deepEqual(res.newState.allocation, base.allocation);
+});
+
+test('QA Audit: Resource Accounting Modes - available_direct vs total_instances', () => {
+  const base = getScenarioA();
+
+  // Mode 1: available_direct allows custom Available without totalInstances mismatch warning
+  const directState: typeof base = {
+    ...base,
+    available: [5, 5, 5],
+    accountingMode: 'available_direct',
+  };
+  const valDirect = validateSetup(directState);
+  assert.equal(valDirect.isValid, true);
+  const mismatchIssue = valDirect.issues.find((i) => i.code === 'SETUP_AVAILABLE_MISMATCH');
+  assert.equal(mismatchIssue, undefined, 'Spurious mismatch warning must be suppressed in available_direct mode');
+
+  // Mode 2: total_instances flags error if total < allocated
+  // Total allocated for Scenario A is [7, 2, 5].
+  // If user sets total instances of A to 5 (less than 7 allocated), it must flag an error
+  const invalidTotalState: typeof base = {
+    ...base,
+    totalInstances: [5, 10, 10], // 5 < 7
+    accountingMode: 'total_instances',
+  };
+  const valTotal = validateSetup(invalidTotalState);
+  assert.equal(valTotal.isValid, false);
+  const totalIssue = valTotal.issues.find((i) => i.code === 'SETUP_TOTAL_LT_ALLOCATED');
+  assert.ok(totalIssue, 'Total instances less than allocated must produce validation error');
+});
+
+test('QA Audit: Custom 4-process 3-resource scenario verifies sequence <P1, P2, P3, P0>', () => {
+  const alloc = [
+    [0, 1, 0], // P0
+    [2, 0, 0], // P1
+    [3, 0, 2], // P2
+    [2, 1, 1], // P3
+  ];
+  const max = [
+    [2, 1, 0], // P0
+    [3, 2, 2], // P1
+    [4, 0, 2], // P2
+    [2, 2, 2], // P3
+  ];
+  const need = computeNeed(max, alloc);
+  assert.deepEqual(need, [
+    [2, 0, 0], // P0
+    [1, 2, 2], // P1
+    [1, 0, 0], // P2
+    [0, 1, 1], // P3
+  ]);
+
+  const available = [1, 2, 2];
+  const safety = safetyCheck(alloc, max, available, need);
+
+  assert.equal(safety.isSafe, true);
+  assert.deepEqual(safety.safeSequence, [1, 2, 3, 0]);
+  assert.deepEqual(
+    safety.steps.map((s) => s.processName),
+    ['P1', 'P2', 'P3', 'P0']
+  );
+  assert.deepEqual(safety.finalWork, [8, 4, 5]);
+});

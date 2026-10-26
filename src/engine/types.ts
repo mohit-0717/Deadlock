@@ -8,7 +8,24 @@ export type SystemStatus =
   | 'UNSAFE'
   | 'WAITING'
   | 'DEADLOCK_DETECTED'
-  | 'INVALID_INPUT';
+  | 'INVALID_INPUT'
+  | 'ANALYSIS_OUT_OF_DATE';
+
+export type RequestOutcome =
+  | 'GRANTED'
+  | 'WAITING'
+  | 'DENIED_UNSAFE'
+  | 'INVALID_INPUT'
+  | 'INVALID_REQUEST';
+
+export type CheckStatus = 'PASSED' | 'FAILED' | 'WAITING' | 'NOT_EVALUATED';
+
+export interface RequestChecksSummary {
+  format: { status: 'PASSED' | 'FAILED'; detail: string };
+  need: { status: 'PASSED' | 'FAILED' | 'NOT_EVALUATED'; detail: string };
+  available: { status: 'PASSED' | 'WAITING' | 'NOT_EVALUATED'; detail: string };
+  safety: { status: 'PASSED' | 'FAILED' | 'NOT_EVALUATED'; detail: string };
+}
 
 export interface SystemState {
   processCount: number;
@@ -20,6 +37,7 @@ export interface SystemState {
   need: number[][];        // n x m, automatically computed (Max - Allocation)
   available: number[];     // length m
   totalInstances?: number[]; // optional total capacity
+  accountingMode?: 'available_direct' | 'total_instances';
 }
 
 export interface SafetyStep {
@@ -60,9 +78,11 @@ export interface SafetyResult {
 
 export interface RequestHandlingResult {
   status: SystemStatus;
+  outcome: RequestOutcome;
   granted: boolean;
   message: string;
   reason: string;
+  explanation: string;
   ruleCode: 'a_invalid_format' | 'b_exceeds_need' | 'c_exceeds_available' | 'd_safe_granted' | 'd_unsafe_denied';
   priorState: SystemState;
   newState: SystemState; // If granted or trial
@@ -70,6 +90,7 @@ export interface RequestHandlingResult {
   trialState?: SystemState;
   rollbackPerformed: boolean;
   deficit?: { resourceIndex: number; resourceName: string; requested: number; available: number }[];
+  checks: RequestChecksSummary;
 }
 
 export interface DetectionStep {

@@ -1,6 +1,6 @@
 import React from 'react';
-import { ShieldCheck, ShieldAlert, Clock, Lock, AlertCircle } from 'lucide-react';
-import { SystemStatus } from '../engine/types.js';
+import { ShieldCheck, ShieldAlert, Clock, Lock, AlertCircle, RefreshCw, CheckCircle2, XCircle, MinusCircle } from 'lucide-react';
+import { SystemStatus, CheckStatus } from '../engine/types.js';
 
 interface StatusBadgeProps {
   status: SystemStatus;
@@ -61,11 +61,76 @@ export const STATUS_CONFIG: Record<
     label: 'Invalid Input',
     description: 'Request violates format, bounds, or declared maximum claim.',
     icon: AlertCircle,
-    bgClass: 'bg-slate-100',
-    borderClass: 'border-slate-200',
-    textClass: 'text-slate-800',
-    dotClass: 'bg-slate-500',
+    bgClass: 'bg-rose-50',
+    borderClass: 'border-rose-200',
+    textClass: 'text-rose-800',
+    dotClass: 'bg-rose-500',
   },
+  ANALYSIS_OUT_OF_DATE: {
+    label: 'Analysis Out of Date',
+    description: 'Inputs have changed since this analysis was calculated. Re-evaluation required.',
+    icon: RefreshCw,
+    bgClass: 'bg-amber-50/80',
+    borderClass: 'border-amber-300',
+    textClass: 'text-amber-900',
+    dotClass: 'bg-amber-500 animate-pulse',
+  },
+};
+
+export const CHECK_STATUS_CONFIG: Record<
+  CheckStatus,
+  {
+    label: string;
+    bgClass: string;
+    borderClass: string;
+    textClass: string;
+    icon: React.ComponentType<{ className?: string }>;
+  }
+> = {
+  PASSED: {
+    label: 'PASSED',
+    bgClass: 'bg-emerald-50',
+    borderClass: 'border-emerald-300',
+    textClass: 'text-emerald-800 font-bold',
+    icon: CheckCircle2,
+  },
+  FAILED: {
+    label: 'FAILED',
+    bgClass: 'bg-rose-50',
+    borderClass: 'border-rose-300',
+    textClass: 'text-rose-800 font-bold',
+    icon: XCircle,
+  },
+  WAITING: {
+    label: 'WAITING (DEFERRED)',
+    bgClass: 'bg-amber-50',
+    borderClass: 'border-amber-300',
+    textClass: 'text-amber-800 font-bold',
+    icon: Clock,
+  },
+  NOT_EVALUATED: {
+    label: 'NOT EVALUATED',
+    bgClass: 'bg-slate-100',
+    borderClass: 'border-slate-300',
+    textClass: 'text-slate-500 font-semibold',
+    icon: MinusCircle,
+  },
+};
+
+export const CheckStatusBadge: React.FC<{ status: CheckStatus; customText?: string }> = ({
+  status,
+  customText,
+}) => {
+  const cfg = CHECK_STATUS_CONFIG[status];
+  const Icon = cfg.icon;
+  return (
+    <span
+      className={`inline-flex items-center gap-1 px-2 py-0.5 rounded text-[11px] border ${cfg.bgClass} ${cfg.borderClass} ${cfg.textClass}`}
+    >
+      <Icon className="w-3 h-3 shrink-0" />
+      <span>{customText || cfg.label}</span>
+    </span>
+  );
 };
 
 export const StatusBadge: React.FC<StatusBadgeProps> = ({

@@ -112,14 +112,22 @@ export const Navbar: React.FC<NavbarProps> = ({
             <button
               key={tab.id}
               onClick={() => onTabChange(tab.id)}
-              className={`px-2.5 py-1.5 rounded-md text-xs font-semibold flex items-center gap-1.5 whitespace-nowrap ${
+              className={`px-3 py-1.5 rounded-lg text-xs font-semibold flex items-center gap-1.5 whitespace-nowrap transition-colors cursor-pointer ${
                 isActive
-                  ? 'bg-indigo-600 text-white shadow-2xs'
-                  : 'text-slate-600 hover:bg-slate-200/60'
+                  ? 'bg-indigo-600 text-white font-bold shadow-xs'
+                  : 'bg-white text-slate-700 hover:bg-slate-100 border border-slate-200'
               }`}
             >
-              <Icon className="w-3.5 h-3.5" />
-              <span>{tab.label.split(' ')[0]}</span>
+              <Icon className={`w-3.5 h-3.5 ${isActive ? 'text-white' : 'text-slate-500'}`} />
+              <span>
+                {tab.id === 'avoidance'
+                  ? "Banker's (Avoidance)"
+                  : tab.id === 'detection'
+                  ? 'RAG Detection'
+                  : tab.id === 'prevention'
+                  ? 'Prevention'
+                  : 'Test Lab'}
+              </span>
             </button>
           );
         })}
