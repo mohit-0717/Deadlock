@@ -1635,7 +1635,7 @@ export const AvoidanceTab: React.FC<AvoidanceTabProps> = ({
                   {stepPopup.processName} Need [{stepPopup.need.join(', ')}] &le; Work [{stepPopup.workBefore.join(', ')}]
                 </p>
                 <p className="text-[11px] text-emerald-700 font-sans font-semibold">
-                  &check; Resources are available. Process runs and finishes execution.
+                  ✓ Resources are available. Process runs and finishes execution.
                 </p>
               </div>
 
