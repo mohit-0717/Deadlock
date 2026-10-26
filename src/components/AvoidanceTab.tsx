@@ -14,6 +14,9 @@ import {
   Undo2,
   Info,
   GitBranch,
+  Plus,
+  Minus,
+  Calculator,
 } from 'lucide-react';
 import { RequestHandlingResult, SafetyResult, SystemState, SystemStatus } from '../engine/types.js';
 import { computeNeed, requestResource, safetyCheck } from '../engine/bankers.js';
@@ -220,6 +223,139 @@ export const AvoidanceTab: React.FC<AvoidanceTabProps> = ({
     return totals;
   }, [systemState.allocation, systemState.processCount, systemState.resourceCount]);
 
+  // Dimension and Total Instance Helper state
+  const [showTotalHelper, setShowTotalHelper] = useState(false);
+  const [totalInputs, setTotalInputs] = useState<string[]>(() =>
+    systemState.resourceNames.map((_, idx) =>
+      String(systemState.totalInstances?.[idx] ?? (systemState.available[idx] + (totalAllocated[idx] || 0)))
+    )
+  );
+
+  // Keep totalInputs vector length synced with resourceCount
+  useEffect(() => {
+    setTotalInputs((prev) => {
+      const arr = [...prev];
+      while (arr.length < systemState.resourceCount) {
+        const rIdx = arr.length;
+        const fallback = (systemState.available[rIdx] || 0) + (totalAllocated[rIdx] || 0);
+        arr.push(String(fallback || 10));
+      }
+      return arr.slice(0, systemState.resourceCount);
+    });
+  }, [systemState.resourceCount]);
+
+  const handleAddProcess = () => {
+    if (systemState.processCount >= 8) return;
+    const newCount = systemState.processCount + 1;
+    const newProcName = `P${systemState.processCount}`;
+    const newAllocRow = Array(systemState.resourceCount).fill(0);
+    const newMaxRow = Array(systemState.resourceCount).fill(0);
+    const newAlloc = [...systemState.allocation, newAllocRow];
+    const newMax = [...systemState.max, newMaxRow];
+    const newNeed = computeNeed(newMax, newAlloc);
+    const newProcNames = [...systemState.processNames, newProcName];
+
+    const updatedState: SystemState = {
+      ...systemState,
+      processCount: newCount,
+      processNames: newProcNames,
+      allocation: newAlloc,
+      max: newMax,
+      need: newNeed,
+    };
+    const valResult = validateSetup(updatedState);
+    setValidationErrors(valResult.issues);
+    onStateChange(updatedState);
+  };
+
+  const handleRemoveProcess = () => {
+    if (systemState.processCount <= 2) return;
+    const newCount = systemState.processCount - 1;
+    const newAlloc = systemState.allocation.slice(0, newCount);
+    const newMax = systemState.max.slice(0, newCount);
+    const newNeed = computeNeed(newMax, newAlloc);
+    const newProcNames = systemState.processNames.slice(0, newCount);
+
+    const updatedState: SystemState = {
+      ...systemState,
+      processCount: newCount,
+      processNames: newProcNames,
+      allocation: newAlloc,
+      max: newMax,
+      need: newNeed,
+    };
+    if (selectedProcessId >= newCount) {
+      setSelectedProcessId(0);
+    }
+    const valResult = validateSetup(updatedState);
+    setValidationErrors(valResult.issues);
+    onStateChange(updatedState);
+  };
+
+  const handleAddResource = () => {
+    if (systemState.resourceCount >= 6) return;
+    const newCount = systemState.resourceCount + 1;
+    const nextLetter = String.fromCharCode(65 + systemState.resourceCount);
+    const newResNames = [...systemState.resourceNames, nextLetter];
+    const newAlloc = systemState.allocation.map((row) => [...row, 0]);
+    const newMax = systemState.max.map((row) => [...row, 0]);
+    const newAvail = [...systemState.available, 0];
+    const newNeed = computeNeed(newMax, newAlloc);
+    const newTotal = systemState.totalInstances ? [...systemState.totalInstances, 0] : undefined;
+
+    const updatedState: SystemState = {
+      ...systemState,
+      resourceCount: newCount,
+      resourceNames: newResNames,
+      allocation: newAlloc,
+      max: newMax,
+      need: newNeed,
+      available: newAvail,
+      totalInstances: newTotal,
+    };
+    const valResult = validateSetup(updatedState);
+    setValidationErrors(valResult.issues);
+    onStateChange(updatedState);
+  };
+
+  const handleRemoveResource = () => {
+    if (systemState.resourceCount <= 1) return;
+    const newCount = systemState.resourceCount - 1;
+    const newResNames = systemState.resourceNames.slice(0, newCount);
+    const newAlloc = systemState.allocation.map((row) => row.slice(0, newCount));
+    const newMax = systemState.max.map((row) => row.slice(0, newCount));
+    const newAvail = systemState.available.slice(0, newCount);
+    const newNeed = computeNeed(newMax, newAlloc);
+    const newTotal = systemState.totalInstances ? systemState.totalInstances.slice(0, newCount) : undefined;
+
+    const updatedState: SystemState = {
+      ...systemState,
+      resourceCount: newCount,
+      resourceNames: newResNames,
+      allocation: newAlloc,
+      max: newMax,
+      need: newNeed,
+      available: newAvail,
+      totalInstances: newTotal,
+    };
+    const valResult = validateSetup(updatedState);
+    setValidationErrors(valResult.issues);
+    onStateChange(updatedState);
+  };
+
+  const applyTotalInstances = () => {
+    const parsedTotals = totalInputs.map((val) => Math.max(0, parseInt(val, 10) || 0));
+    const newAvail = parsedTotals.map((tot, rIdx) => Math.max(0, tot - (totalAllocated[rIdx] || 0)));
+    const updatedState: SystemState = {
+      ...systemState,
+      available: newAvail,
+      totalInstances: parsedTotals,
+    };
+    const valResult = validateSetup(updatedState);
+    setValidationErrors(valResult.issues);
+    onStateChange(updatedState);
+  };
+
   return (
     <div className="space-y-6">
       {/* 1. Academic Header & Scenario Bar */}
@@ -323,6 +459,118 @@ export const AvoidanceTab: React.FC<AvoidanceTabProps> = ({
           <div className="p-3 bg-rose-50 border-b border-rose-200 text-rose-800 text-xs flex items-center gap-2 font-medium">
             <AlertTriangle className="w-4 h-4 text-rose-600 shrink-0" />
             <span>{validationErrors[0].message}</span>
+          </div>
+        )}
+
+        {/* Dynamic Dimensions & Helpers Toolbar in Edit Mode */}
+        {isEditMode && (
+          <div className="p-3 bg-indigo-50/50 border-b border-indigo-100 flex flex-wrap items-center justify-between gap-3 text-xs">
+            <div className="flex flex-wrap items-center gap-4">
+              {/* Process Count */}
+              <div className="flex items-center gap-2">
+                <span className="font-bold text-slate-700">Processes:</span>
+                <span className="font-mono font-bold bg-white px-2 py-0.5 rounded border border-slate-300 text-slate-800">
+                  {systemState.processCount}
+                </span>
+                <div className="inline-flex rounded-md shadow-2xs">
+                  <button
+                    onClick={handleRemoveProcess}
+                    disabled={systemState.processCount <= 2}
+                    className="px-2 py-1 bg-white hover:bg-slate-50 text-slate-700 border border-slate-300 rounded-l disabled:opacity-40 disabled:cursor-not-allowed font-bold cursor-pointer"
+                    title="Remove last process (min 2)"
+                  >
+                    <Minus className="w-3 h-3" />
+                  </button>
+                  <button
+                    onClick={handleAddProcess}
+                    disabled={systemState.processCount >= 8}
+                    className="px-2 py-1 bg-white hover:bg-slate-50 text-slate-700 border border-l-0 border-slate-300 rounded-r disabled:opacity-40 disabled:cursor-not-allowed font-bold cursor-pointer"
+                    title="Add new process (max 8)"
+                  >
+                    <Plus className="w-3 h-3" />
+                  </button>
+                </div>
+              </div>
+
+              {/* Resource Count */}
+              <div className="flex items-center gap-2">
+                <span className="font-bold text-slate-700">Resources:</span>
+                <span className="font-mono font-bold bg-white px-2 py-0.5 rounded border border-slate-300 text-slate-800">
+                  {systemState.resourceCount} ({systemState.resourceNames.join(', ')})
+                </span>
+                <div className="inline-flex rounded-md shadow-2xs">
+                  <button
+                    onClick={handleRemoveResource}
+                    disabled={systemState.resourceCount <= 1}
+                    className="px-2 py-1 bg-white hover:bg-slate-50 text-slate-700 border border-slate-300 rounded-l disabled:opacity-40 disabled:cursor-not-allowed font-bold cursor-pointer"
+                    title="Remove last resource (min 1)"
+                  >
+                    <Minus className="w-3 h-3" />
+                  </button>
+                  <button
+                    onClick={handleAddResource}
+                    disabled={systemState.resourceCount >= 6}
+                    className="px-2 py-1 bg-white hover:bg-slate-50 text-slate-700 border border-l-0 border-slate-300 rounded-r disabled:opacity-40 disabled:cursor-not-allowed font-bold cursor-pointer"
+                    title="Add new resource (e.g. D, E; max 6)"
+                  >
+                    <Plus className="w-3 h-3" />
+                  </button>
+                </div>
+              </div>
+            </div>
+
+            {/* Helper: Compute from Total Instances */}
+            <div className="flex items-center gap-2">
+              <button
+                onClick={() => setShowTotalHelper(!showTotalHelper)}
+                className={`px-2.5 py-1 rounded text-xs font-semibold flex items-center gap-1.5 border transition-colors cursor-pointer ${
+                  showTotalHelper
+                    ? 'bg-amber-100 text-amber-900 border-amber-300'
+                    : 'bg-white hover:bg-slate-50 text-slate-700 border-slate-300'
+                }`}
+                title="If your question gives Total Instances instead of Available, click here to compute Available"
+              >
+                <Calculator className="w-3.5 h-3.5 text-amber-700" />
+                <span>Calculate from Total Instances</span>
+              </button>
+            </div>
+          </div>
+        )}
+
+        {/* Total Instances Calculator Sub-Panel */}
+        {isEditMode && showTotalHelper && (
+          <div className="p-3 bg-amber-50/70 border-b border-amber-200 text-xs flex flex-wrap items-center justify-between gap-3">
+            <div className="flex items-center gap-2 flex-wrap">
+              <span className="font-bold text-amber-950">Enter Total Instances (Total &minus; Allocated = Available):</span>
+              <div className="flex items-center gap-2">
+                {systemState.resourceNames.map((rName, rIdx) => (
+                  <div key={rIdx} className="flex items-center gap-1 font-mono">
+                    <span className="font-bold text-amber-900">{rName}:</span>
+                    <input
+                      type="number"
+                      min={0}
+                      value={totalInputs[rIdx] ?? ''}
+                      onChange={(e) => {
+                        const val = e.target.value;
+                        setTotalInputs((prev) => {
+                          const next = [...prev];
+                          next[rIdx] = val;
+                          return next;
+                        });
+                      }}
+                      className="w-12 h-6 text-center bg-white border border-amber-300 rounded text-slate-900 font-bold"
+                      placeholder="Tot"
+                    />
+                  </div>
+                ))}
+              </div>
+            </div>
+            <button
+              onClick={applyTotalInstances}
+              className="px-3 py-1 bg-amber-600 hover:bg-amber-700 text-white rounded font-bold cursor-pointer transition-colors shadow-2xs"
+            >
+              Apply to Available
+            </button>
           </div>
         )}
 
