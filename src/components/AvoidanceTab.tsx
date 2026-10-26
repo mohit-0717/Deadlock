@@ -57,6 +57,8 @@ export const AvoidanceTab: React.FC<AvoidanceTabProps> = ({
   const [isEditMode, setIsEditMode] = useState<boolean>(false);
   const [showRAGGraph, setShowRAGGraph] = useState<boolean>(false);
   const [validationErrors, setValidationErrors] = useState<ValidationIssue[]>([]);
+  // Tracks whether the safety algorithm has been executed for the current matrices
+  const [isSafetyEvaluated, setIsSafetyEvaluated] = useState<boolean>(true);
 
   // Compute live RAG graph directly from Banker's current state
   const ragGraph = useMemo(() => {
@@ -68,17 +70,6 @@ export const AvoidanceTab: React.FC<AvoidanceTabProps> = ({
       systemState.processNames,
       systemState.resourceNames
     );
-  }, [systemState]);
-
-  // Re-run safety check whenever systemState changes
-  useEffect(() => {
-    const res = safetyCheck(systemState.allocation, systemState.max, systemState.available, systemState.need);
-    setSafetyResult(res);
-    setCurrentStepIndex(-1);
-
-    if (onStatusChange) {
-      onStatusChange(res.status);
-    }
   }, [systemState]);
 
   // Keep requestInput vector length synced with resourceCount
@@ -95,29 +86,52 @@ export const AvoidanceTab: React.FC<AvoidanceTabProps> = ({
 
   // Calculate live Work vector based on current step in replay
   const liveWorkVector = useMemo(() => {
-    if (currentStepIndex < 0) {
+    if (!isSafetyEvaluated || currentStepIndex < 0) {
       return initialWorkVector;
     }
     const currentStep = safetyResult.steps[currentStepIndex];
     return currentStep ? currentStep.workAfter : safetyResult.finalWork;
-  }, [currentStepIndex, safetyResult, initialWorkVector]);
+  }, [isSafetyEvaluated, currentStepIndex, safetyResult, initialWorkVector]);
+
+  // Executes the safety check on demand when user presses button
+  const runSafetyEvaluation = () => {
+    const res = safetyCheck(
+      systemState.allocation,
+      systemState.max,
+      systemState.available,
+      systemState.need
+    );
+    setSafetyResult(res);
+    setIsSafetyEvaluated(true);
+    if (onStatusChange) {
+      onStatusChange(res.status);
+    }
+    return res;
+  };
 
   // Step forward in safety algorithm
   const stepForward = () => {
-    if (currentStepIndex + 1 < safetyResult.steps.length) {
+    let activeRes = safetyResult;
+    if (!isSafetyEvaluated) {
+      activeRes = runSafetyEvaluation();
+      setCurrentStepIndex(0);
+      return;
+    }
+    if (currentStepIndex + 1 < activeRes.steps.length) {
       setCurrentStepIndex((prev) => prev + 1);
     }
   };
 
   const runAllSteps = () => {
-    setCurrentStepIndex(safetyResult.steps.length - 1);
+    const res = runSafetyEvaluation();
+    setCurrentStepIndex(res.steps.length - 1);
   };
 
   const resetSteps = () => {
     setCurrentStepIndex(-1);
   };
 
-  // Handle resource request submission
+  // Handle resource request submission (only evaluates when button is pressed)
   const handleSendRequest = (overrideProcId?: number, overrideVector?: number[]) => {
     const pId = overrideProcId !== undefined ? overrideProcId : selectedProcessId;
     const req = overrideVector || requestInput.map((val) => parseInt(val, 10) || 0);
@@ -127,11 +141,15 @@ export const AvoidanceTab: React.FC<AvoidanceTabProps> = ({
 
     if (result.status === 'SAFE' && result.granted) {
       onStateChange(result.newState);
+      if (result.safetyResult) {
+        setSafetyResult(result.safetyResult);
+        setIsSafetyEvaluated(true);
+        setCurrentStepIndex(-1);
+      }
       if (onStatusChange) {
         onStatusChange('SAFE');
       }
     } else {
-      // Unsafe or Waiting: keep system in prior committed state
       if (onStatusChange) {
         onStatusChange(safetyResult.status);
       }
@@ -174,6 +192,9 @@ export const AvoidanceTab: React.FC<AvoidanceTabProps> = ({
 
     const valResult = validateSetup(updatedState);
     setValidationErrors(valResult.issues);
+    setIsSafetyEvaluated(false);
+    setLastRequestResult(null);
+    setCurrentStepIndex(-1);
     onStateChange(updatedState);
   };
 
@@ -198,6 +219,9 @@ export const AvoidanceTab: React.FC<AvoidanceTabProps> = ({
 
     const valResult = validateSetup(updatedState);
     setValidationErrors(valResult.issues);
+    setIsSafetyEvaluated(false);
+    setLastRequestResult(null);
+    setCurrentStepIndex(-1);
     onStateChange(updatedState);
   };
 
@@ -207,22 +231,33 @@ export const AvoidanceTab: React.FC<AvoidanceTabProps> = ({
     setIsEditMode(false);
     resetSteps();
 
+    let targetState = getScenarioA();
     if (type === 'A') {
-      onStateChange(getScenarioA());
+      targetState = getScenarioA();
+      onStateChange(targetState);
     } else if (type === 'B') {
       const base = getScenarioA();
       const res = requestResource(0, [7, 4, 3], base);
       setSelectedProcessId(0);
       setRequestInput(['7', '4', '3']);
       setLastRequestResult(res);
-      onStateChange(res.newState);
+      targetState = res.newState;
+      onStateChange(targetState);
     } else if (type === 'C') {
       const base = getScenarioA();
       const res = requestResource(0, [0, 0, 2], base);
       setSelectedProcessId(0);
       setRequestInput(['0', '0', '2']);
       setLastRequestResult(res);
-      onStateChange(res.newState);
+      targetState = res.newState;
+      onStateChange(targetState);
+    }
+
+    const res = safetyCheck(targetState.allocation, targetState.max, targetState.available, targetState.need);
+    setSafetyResult(res);
+    setIsSafetyEvaluated(true);
+    if (onStatusChange) {
+      onStatusChange(res.status);
     }
   };
 
@@ -279,6 +314,9 @@ export const AvoidanceTab: React.FC<AvoidanceTabProps> = ({
     };
     const valResult = validateSetup(updatedState);
     setValidationErrors(valResult.issues);
+    setIsSafetyEvaluated(false);
+    setLastRequestResult(null);
+    setCurrentStepIndex(-1);
     onStateChange(updatedState);
   };
 
@@ -303,6 +341,9 @@ export const AvoidanceTab: React.FC<AvoidanceTabProps> = ({
     }
     const valResult = validateSetup(updatedState);
     setValidationErrors(valResult.issues);
+    setIsSafetyEvaluated(false);
+    setLastRequestResult(null);
+    setCurrentStepIndex(-1);
     onStateChange(updatedState);
   };
 
@@ -329,6 +370,9 @@ export const AvoidanceTab: React.FC<AvoidanceTabProps> = ({
     };
     const valResult = validateSetup(updatedState);
     setValidationErrors(valResult.issues);
+    setIsSafetyEvaluated(false);
+    setLastRequestResult(null);
+    setCurrentStepIndex(-1);
     onStateChange(updatedState);
   };
 
@@ -354,6 +398,9 @@ export const AvoidanceTab: React.FC<AvoidanceTabProps> = ({
     };
     const valResult = validateSetup(updatedState);
     setValidationErrors(valResult.issues);
+    setIsSafetyEvaluated(false);
+    setLastRequestResult(null);
+    setCurrentStepIndex(-1);
     onStateChange(updatedState);
   };
 
@@ -367,6 +414,9 @@ export const AvoidanceTab: React.FC<AvoidanceTabProps> = ({
     };
     const valResult = validateSetup(updatedState);
     setValidationErrors(valResult.issues);
+    setIsSafetyEvaluated(false);
+    setLastRequestResult(null);
+    setCurrentStepIndex(-1);
     onStateChange(updatedState);
   };
 
@@ -682,8 +732,8 @@ export const AvoidanceTab: React.FC<AvoidanceTabProps> = ({
                 const isSelected = selectedProcessId === pIdx;
                 const need = systemState.need[pIdx];
                 const canRun = need.every((nd, rIdx) => nd <= (liveWorkVector[rIdx] ?? 0));
-                const isStepFinished = currentStepIndex >= 0 && safetyResult.steps.slice(0, currentStepIndex + 1).some(s => s.processId === pIdx);
-                const isCurrentActiveStep = currentStepIndex >= 0 && safetyResult.steps[currentStepIndex]?.processId === pIdx;
+                const isStepFinished = isSafetyEvaluated && currentStepIndex >= 0 && safetyResult.steps.slice(0, currentStepIndex + 1).some(s => s.processId === pIdx);
+                const isCurrentActiveStep = isSafetyEvaluated && currentStepIndex >= 0 && safetyResult.steps[currentStepIndex]?.processId === pIdx;
 
                 return (
                   <tr
@@ -892,7 +942,19 @@ export const AvoidanceTab: React.FC<AvoidanceTabProps> = ({
           </div>
 
           {/* Big, Obvious Result Banner */}
-          {safetyResult.isSafe ? (
+          {!isSafetyEvaluated ? (
+            <div className="p-4 rounded-xl bg-amber-50 border border-amber-200 text-amber-950 space-y-2">
+              <div className="flex items-center gap-2">
+                <AlertTriangle className="w-5 h-5 text-amber-600 shrink-0" />
+                <span className="font-bold text-sm text-amber-900">
+                  Matrices Modified &bull; Evaluation Pending
+                </span>
+              </div>
+              <p className="text-xs text-amber-800 leading-relaxed">
+                Inputs have been modified. Press <strong>&ldquo;Run Full Check&rdquo;</strong> to run Dijkstra&apos;s Safety Algorithm and find the safe sequence.
+              </p>
+            </div>
+          ) : safetyResult.isSafe ? (
             <div className="p-4 rounded-xl bg-emerald-50 border border-emerald-200 text-emerald-950 space-y-2">
               <div className="flex items-center gap-2">
                 <CheckCircle2 className="w-5 h-5 text-emerald-600 shrink-0" />
@@ -925,7 +987,7 @@ export const AvoidanceTab: React.FC<AvoidanceTabProps> = ({
           )}
 
           {/* Clean Step-by-Step Table */}
-          {safetyResult.steps.length > 0 && (
+          {isSafetyEvaluated && safetyResult.steps.length > 0 && (
             <div className="space-y-2 pt-2">
               <span className="text-xs font-bold text-slate-700 block">
                 Execution Steps Trace (Work = Work + Allocation):

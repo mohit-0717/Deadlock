@@ -3,10 +3,9 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect } from 'react';
 import { SystemState, SystemStatus } from './engine/types.js';
 import { getScenarioA } from './engine/scenarios.js';
-import { safetyCheck } from './engine/bankers.js';
 import { Navbar } from './components/Navbar.js';
 import { AvoidanceTab } from './components/AvoidanceTab.js';
 import { DetectionTab } from './components/DetectionTab.js';
@@ -26,16 +25,6 @@ export default function App() {
   const [speed] = useState<number>(1.0);
   const [reduceMotion] = useState<boolean>(false);
 
-  // Compute live safety check for the active avoidance state
-  const liveSafety = useMemo(() => {
-    return safetyCheck(
-      systemState.allocation,
-      systemState.max,
-      systemState.available,
-      systemState.need
-    );
-  }, [systemState]);
-
   // Strictly enforce clean Light Theme on root document
   useEffect(() => {
     const root = document.documentElement;
@@ -46,12 +35,12 @@ export default function App() {
   }, []);
 
   // Compute status badge strictly reflecting committed active tab's result
-  let currentBadgeStatus: SystemStatus = liveSafety.isSafe ? 'SAFE' : 'UNSAFE';
+  let currentBadgeStatus: SystemStatus = avoidanceStatus;
   let currentBadgeLabel: string | undefined = undefined;
 
   if (activeTab === 'avoidance') {
-    currentBadgeStatus = liveSafety.isSafe ? 'SAFE' : 'UNSAFE';
-    currentBadgeLabel = liveSafety.isSafe ? 'Safe State' : 'Unsafe State';
+    currentBadgeStatus = avoidanceStatus;
+    currentBadgeLabel = avoidanceStatus === 'SAFE' ? 'Safe State' : avoidanceStatus === 'UNSAFE' ? 'Unsafe State' : 'Evaluation Pending';
   } else if (activeTab === 'detection') {
     currentBadgeStatus = detectionStatus;
     currentBadgeLabel = detectionStatus === 'DEADLOCK_DETECTED' ? 'Deadlock Detected' : 'No Deadlock';
