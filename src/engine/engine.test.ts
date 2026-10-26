@@ -733,3 +733,137 @@ test('QA Audit: Custom 4-process 3-resource scenario verifies sequence <P1, P2, 
   );
   assert.deepEqual(safety.finalWork, [8, 4, 5]);
 });
+
+// =========================================================================
+// QA & Manual Testing Suite: RAG, Detection & Recovery Recalculation
+// =========================================================================
+
+test('QA RAG: Scenario D1 cycle path and deadlocked process names agree exactly', () => {
+  const d1 = getScenarioD1();
+  const result = detectDeadlockSingleInstance(
+    d1.allocation,
+    d1.request,
+    d1.available,
+    d1.processNames,
+    d1.resourceNames
+  );
+
+  assert.equal(result.hasDeadlock, true);
+  assert.deepEqual(result.deadlockedProcessNames, ['P1', 'P2']);
+  assert.deepEqual(result.deadlockedProcessIds, [0, 1]);
+  // WFG cycle path must contain actual process names P1 and P2, NEVER mismatched P0 -> P1 -> P0
+  assert.ok(result.explanation.includes('P1 → P2 → P1') || result.explanation.includes('P2 → P1 → P2'));
+  assert.ok(!result.explanation.includes('P0'));
+
+  // RAG bipartite graph cycles must also use actual node names
+  const rag = buildRAG(d1.allocation, d1.request, d1.available, d1.totalInstances, d1.processNames, d1.resourceNames);
+  assert.ok(rag.cycles.length > 0);
+  const flatRagCycle = rag.cycles.flat();
+  assert.ok(flatRagCycle.includes('P1'));
+  assert.ok(flatRagCycle.includes('P2'));
+  assert.ok(!flatRagCycle.includes('P0'));
+});
+
+test('QA RAG: Scenario D1 single-instance recovery by terminating P1 recalculates remaining P2 eligibility and Work', () => {
+  const d1 = getScenarioD1();
+  // Terminate P1 (index 0)
+  const recovery = terminateProcessAndRecover(
+    0,
+    d1.allocation,
+    d1.request,
+    d1.available,
+    true, // isSingleInstance
+    d1.processNames,
+    d1.resourceNames
+  );
+
+  assert.deepEqual(recovery.releasedResources, [1, 0]);
+  assert.deepEqual(recovery.newAvailable, [1, 0]);
+  assert.deepEqual(recovery.newAllocation[0], [0, 0]);
+  assert.deepEqual(recovery.newRequest[0], [0, 0]);
+
+  // Deadlock is resolved
+  assert.equal(recovery.detectionResult.hasDeadlock, false);
+  assert.equal(recovery.detectionResult.status, 'SAFE');
+
+  // P2 Request [1, 0] <= Available [1, 0] -> P2 must be eligible to complete!
+  assert.equal(recovery.detectionResult.steps.length, 1);
+  const step = recovery.detectionResult.steps[0];
+  assert.equal(step.processName, 'P2');
+  assert.deepEqual(step.workBefore, [1, 0]);
+  assert.deepEqual(step.allocation, [0, 1]);
+  assert.deepEqual(step.workAfter, [1, 1]);
+
+  // Final Work becomes [1, 0] + [0, 1] = [1, 1]
+  assert.deepEqual(recovery.detectionResult.finalWork, [1, 1]);
+  assert.deepEqual(recovery.detectionResult.resolvedProcessIds, [1]);
+  assert.deepEqual(recovery.detectionResult.finishArray, [true, true]);
+});
+
+test('QA RAG: Scenario D1 single-instance recovery by terminating P2 recalculates remaining P1 eligibility and Work', () => {
+  const d1 = getScenarioD1();
+  // Terminate P2 (index 1)
+  const recovery = terminateProcessAndRecover(
+    1,
+    d1.allocation,
+    d1.request,
+    d1.available,
+    true, // isSingleInstance
+    d1.processNames,
+    d1.resourceNames
+  );
+
+  assert.deepEqual(recovery.releasedResources, [0, 1]);
+  assert.deepEqual(recovery.newAvailable, [0, 1]);
+  assert.deepEqual(recovery.newAllocation[1], [0, 0]);
+  assert.deepEqual(recovery.newRequest[1], [0, 0]);
+
+  // Deadlock is resolved
+  assert.equal(recovery.detectionResult.hasDeadlock, false);
+  assert.equal(recovery.detectionResult.status, 'SAFE');
+
+  // P1 Request [0, 1] <= Available [0, 1] -> P1 must be eligible to complete!
+  assert.equal(recovery.detectionResult.steps.length, 1);
+  const step = recovery.detectionResult.steps[0];
+  assert.equal(step.processName, 'P1');
+  assert.deepEqual(step.workBefore, [0, 1]);
+  assert.deepEqual(step.allocation, [1, 0]);
+  assert.deepEqual(step.workAfter, [1, 1]);
+
+  // Final Work becomes [0, 1] + [1, 0] = [1, 1]
+  assert.deepEqual(recovery.detectionResult.finalWork, [1, 1]);
+  assert.deepEqual(recovery.detectionResult.resolvedProcessIds, [0]);
+  assert.deepEqual(recovery.detectionResult.finishArray, [true, true]);
+});
+
+test('QA RAG: Scenario D3 cycle does not imply deadlock in multi-instance model and executes full reduction', () => {
+  const d3 = getScenarioD3();
+  const detection = detectDeadlockMultiInstance(
+    d3.allocation,
+    d3.request,
+    d3.available,
+    d3.processNames,
+    d3.resourceNames
+  );
+
+  assert.equal(detection.hasDeadlock, false);
+  assert.equal(detection.status, 'SAFE');
+  assert.deepEqual(detection.deadlockedProcessNames, []);
+
+  // Reduction steps execute: P3 -> P2 -> P1
+  assert.equal(detection.steps.length, 3);
+  assert.deepEqual(detection.steps.map((s) => s.processName), ['P3', 'P2', 'P1']);
+  assert.deepEqual(detection.finalWork, [2, 1]);
+});
+
+test('QA RAG: Detection uses outstanding request vector, not Banker Need maximum claims', () => {
+  // In pure detection, a process holding resources without requesting anything can release its allocation immediately
+  const alloc = [[1, 0]];
+  const req = [[0, 0]]; // zero request
+  const avail = [0, 0];
+  const detection = detectDeadlockMultiInstance(alloc, req, avail, ['P0'], ['R1', 'R2']);
+
+  assert.equal(detection.hasDeadlock, false);
+  assert.equal(detection.steps.length, 1);
+  assert.deepEqual(detection.finalWork, [1, 0]);
+});

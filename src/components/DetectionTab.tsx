@@ -265,9 +265,7 @@ export const DetectionTab: React.FC<DetectionTabProps> = ({
       setAvailable(recovery.newAvailable);
 
       const pName = processNames[procId] || `P${procId}`;
-      const relStr = recovery.releasedResources
-        .map((amt, idx) => `${resourceNames[idx] || idx}=${amt}`)
-        .join(', ');
+      const relStr = recovery.releasedResources.join(', ');
 
       const isResolved = !recovery.detectionResult.hasDeadlock;
       const remainingBlocked = recovery.detectionResult.deadlockedProcessNames;
@@ -285,6 +283,38 @@ export const DetectionTab: React.FC<DetectionTabProps> = ({
       setIsTerminatingAnimation(false);
     }, 500 / speed);
   };
+
+  const isRecovered = terminatedProcessId !== null;
+  const isD3 = selectedPreset === 'D3' || (!isSingleInstance && ragGraph.cycles.length > 0 && !detectionResult.hasDeadlock);
+
+  let bannerTitle = '';
+  let bannerExplanation = '';
+
+  if (isRecovered) {
+    if (!detectionResult.hasDeadlock) {
+      bannerTitle = 'Deadlock Resolved via Recovery';
+      const safeSeqStr = recoveryOutcome?.resolvedOrder.length
+        ? recoveryOutcome.resolvedOrder.join(' → ')
+        : detectionResult.resolvedProcessIds.map((id) => processNames[id]).join(' → ');
+      bannerExplanation = `Deadlock resolved. ${recoveryOutcome?.procName || 'Victim process'} was terminated and released resources [${recoveryOutcome?.releasedStr || ''}]. All remaining processes can finish in the verified sequence: <${safeSeqStr}>.`;
+    } else {
+      bannerTitle = 'Partial Recovery (Deadlock Persists)';
+      bannerExplanation = `Process ${recoveryOutcome?.procName || 'Victim'} was terminated and released [${recoveryOutcome?.releasedStr || ''}], but remaining processes {${detectionResult.deadlockedProcessNames.join(', ')}} are still deadlocked.`;
+    }
+  } else if (detectionResult.hasDeadlock) {
+    bannerTitle = `Deadlock Detected among {${detectionResult.deadlockedProcessNames.join(', ')}}`;
+    bannerExplanation = detectionResult.explanation;
+  } else if (isD3) {
+    const cycleStr = ragGraph.cycles.length > 0
+      ? ragGraph.cycles.map((c) => c.join(' → ') + ' → ' + c[0]).join(', ')
+      : 'detected';
+    bannerTitle = 'No Deadlock Detected (Cycle ≠ Deadlock in Multi-Instance Model)';
+    const seqStr = detectionResult.resolvedProcessIds.map((id) => processNames[id]).join(' → ');
+    bannerExplanation = `A directed cycle exists in the Resource Allocation Graph (${cycleStr}), but the system is NOT deadlocked! In multi-instance systems, a cycle is a necessary condition for deadlock, but NOT a sufficient condition. Process P3 holds resources with 0 pending request; releasing its allocation allows all processes to finish in sequence: <${seqStr}>.`;
+  } else {
+    bannerTitle = 'Zero Deadlocks in System (All Processes Can Terminate)';
+    bannerExplanation = detectionResult.explanation;
+  }
 
   return (
     <div className="space-y-6">
@@ -374,6 +404,8 @@ export const DetectionTab: React.FC<DetectionTabProps> = ({
         className={`p-4 rounded-xl border flex flex-col md:flex-row items-start md:items-center justify-between gap-3 shadow-2xs ${
           detectionResult.hasDeadlock
             ? 'bg-rose-50 border-rose-200 text-rose-950'
+            : isRecovered
+            ? 'bg-emerald-50 border-emerald-300 text-emerald-950'
             : 'bg-emerald-50 border-emerald-200 text-emerald-950'
         }`}
       >
@@ -381,12 +413,10 @@ export const DetectionTab: React.FC<DetectionTabProps> = ({
           <StatusBadge status={detectionResult.status} size="sm" />
           <div>
             <h4 className="text-sm font-bold text-slate-900">
-              {detectionResult.hasDeadlock
-                ? `Deadlock Detected among {${detectionResult.deadlockedProcessNames.join(', ')}}`
-                : 'Zero Deadlocks in System (All Processes Can Terminate)'}
+              {bannerTitle}
             </h4>
             <p className="text-xs text-slate-700 mt-0.5">
-              {detectionResult.explanation}
+              {bannerExplanation}
             </p>
           </div>
         </div>
@@ -606,10 +636,22 @@ export const DetectionTab: React.FC<DetectionTabProps> = ({
                       </p>
                     </div>
                   ))}
+                  {!detectionResult.hasDeadlock && detectionResult.resolvedProcessIds.length > 0 && (
+                    <div className="p-2.5 rounded-lg bg-emerald-100/60 border border-emerald-300 flex items-center justify-between text-xs font-sans">
+                      <span className="font-bold text-emerald-950">
+                        {isRecovered ? 'Verified Remaining Sequence:' : 'Complete Reduction Sequence:'}
+                      </span>
+                      <span className="font-mono font-bold text-emerald-900 bg-white px-2 py-0.5 rounded border border-emerald-300">
+                        &lt; {detectionResult.resolvedProcessIds.map((id) => processNames[id]).join(' → ')} &gt;
+                      </span>
+                    </div>
+                  )}
                 </div>
               ) : (
                 <p className="text-xs text-slate-500 italic font-sans">
-                  No process has a Request &le; Available. Work cannot grow.
+                  {detectionResult.hasDeadlock
+                    ? 'No process has a Request ≤ Available. Work cannot grow; algorithm halted.'
+                    : 'All processes hold zero allocation or have completed execution.'}
                 </p>
               )}
 
@@ -695,30 +737,51 @@ export const DetectionTab: React.FC<DetectionTabProps> = ({
 
               {recoveryOutcome && (
                 <div
-                  className={`p-3 rounded-lg border text-xs space-y-1 font-sans ${
+                  className={`p-3.5 rounded-lg border text-xs space-y-2 font-sans ${
                     recoveryOutcome.isResolved
                       ? 'bg-emerald-50 border-emerald-300 text-emerald-950'
                       : 'bg-amber-50 border-amber-300 text-amber-950'
                   }`}
                 >
-                  <div className="font-bold flex items-center gap-1.5">
-                    {recoveryOutcome.isResolved ? (
-                      <>
-                        <CheckCircle2 className="w-4 h-4 text-emerald-600" />
-                        <span>System Deadlock Resolved!</span>
-                      </>
-                    ) : (
-                      <>
-                        <AlertTriangle className="w-4 h-4 text-amber-600" />
-                        <span>Partial Recovery (Deadlock Persists)</span>
-                      </>
+                  <div className="font-bold flex items-center justify-between">
+                    <div className="flex items-center gap-1.5">
+                      {recoveryOutcome.isResolved ? (
+                        <>
+                          <CheckCircle2 className="w-4 h-4 text-emerald-600" />
+                          <span>Deadlock Resolved via Recovery!</span>
+                        </>
+                      ) : (
+                        <>
+                          <AlertTriangle className="w-4 h-4 text-amber-600" />
+                          <span>Partial Recovery (Deadlock Persists)</span>
+                        </>
+                      )}
+                    </div>
+                    <span className="text-[11px] font-mono px-2 py-0.5 rounded bg-white border border-slate-200 text-slate-700">
+                      Terminated: {recoveryOutcome.procName}
+                    </span>
+                  </div>
+                  <div className="space-y-1 text-xs">
+                    <p>
+                      Terminated <strong>{recoveryOutcome.procName}</strong> and reclaimed resources: <span className="font-mono font-bold">[{recoveryOutcome.releasedStr}]</span>.
+                    </p>
+                    <p>
+                      Updated Available / Work pool: <span className="font-mono font-bold text-emerald-800">[{recoveryOutcome.newAvailable.join(', ')}]</span>.
+                    </p>
+                    {recoveryOutcome.resolvedOrder.length > 0 && (
+                      <div className="pt-1 flex items-center gap-1.5 flex-wrap">
+                        <span className="font-semibold text-slate-700">Remaining Process Sequence:</span>
+                        <span className="font-mono font-bold bg-white px-2 py-0.5 rounded border border-emerald-300 text-emerald-950">
+                          &lt; {recoveryOutcome.resolvedOrder.join(' → ')} &gt;
+                        </span>
+                      </div>
+                    )}
+                    {recoveryOutcome.remainingBlocked.length > 0 && (
+                      <p className="text-rose-800 font-semibold pt-1">
+                        Remaining deadlocked processes: &#123;{recoveryOutcome.remainingBlocked.join(', ')}&#125;
+                      </p>
                     )}
                   </div>
-                  <p>
-                    Terminated <strong>{recoveryOutcome.procName}</strong> and reclaimed resources: [
-                    {recoveryOutcome.releasedStr}]. New Available pool is [
-                    {recoveryOutcome.newAvailable.join(', ')}].
-                  </p>
                 </div>
               )}
             </div>

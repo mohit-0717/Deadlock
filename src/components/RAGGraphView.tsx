@@ -296,10 +296,15 @@ export const RAGGraphView: React.FC<RAGGraphViewProps> = ({
           if (!fromPos || !toPos) return null;
 
           const isAssign = edge.type === 'assignment';
+          const fromNode = graph.nodes.find((n) => n.id === edge.from);
+          const toNode = graph.nodes.find((n) => n.id === edge.to);
+          const fromName = fromNode ? fromNode.name : edge.from;
+          const toName = toNode ? toNode.name : edge.to;
+
           const isDeadlockedDependency =
             !isSingleInstance &&
             hasDeadlock &&
-            (deadlockedProcessNames.includes(edge.from) || deadlockedProcessNames.includes(edge.to));
+            (deadlockedProcessNames.includes(fromName) || deadlockedProcessNames.includes(toName));
 
           const isSingleInstanceCycle = isSingleInstance && edge.isCycleEdge && hasDeadlock;
           const isMultiInstanceCycle = !isSingleInstance && edge.isCycleEdge;

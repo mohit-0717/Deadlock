@@ -112,9 +112,16 @@ export function buildRAG(
     }
   }
 
+  // Map internal node IDs to human-readable process/resource names for clear cycle paths
+  const nodeNameMap = new Map<string, string>();
+  for (const nd of nodes) {
+    nodeNameMap.set(nd.id, nd.name);
+  }
+  const namedCycles = cycles.map((cyc) => cyc.map((id) => nodeNameMap.get(id) || id));
+
   return {
     nodes,
     edges,
-    cycles,
+    cycles: namedCycles,
   };
 }
