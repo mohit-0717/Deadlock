@@ -13,7 +13,12 @@ import {
   terminateProcessAndRecover,
   buildRAG,
 } from './detection.ts';
-import { checkOrderingPolicy, checkAllAtOncePolicy } from './prevention.ts';
+import {
+  checkOrderingPolicy,
+  checkAllAtOncePolicy,
+  evaluateOrderingRanks,
+  evaluateAllAtOnceAdmission,
+} from './prevention.ts';
 import {
   getScenarioA,
   getScenarioD1,
@@ -866,4 +871,118 @@ test('QA RAG: Detection uses outstanding request vector, not Banker Need maximum
   assert.equal(detection.hasDeadlock, false);
   assert.equal(detection.steps.length, 1);
   assert.deepEqual(detection.finalWork, [1, 0]);
+});
+
+// =========================================================================
+// Deadlock Prevention Interactive Verification: Ordering & All-At-Once
+// =========================================================================
+
+test('Prevention Ordering: Held Rank 2, Requested Rank 1 is BLOCKED', () => {
+  const result = evaluateOrderingRanks(2, 1);
+  assert.equal(result.isValid, true);
+  assert.equal(result.allowed, false);
+  assert.equal(result.status, 'BLOCKED_BY_ORDERING_POLICY');
+  assert.match(result.message, /BLOCKED BY ORDERING POLICY/);
+  assert.match(result.message, /Requested Rank 1 ≤ Currently Held Rank 2/);
+});
+
+test('Prevention Ordering: Held Rank 2, Requested Rank 2 is BLOCKED', () => {
+  const result = evaluateOrderingRanks(2, 2);
+  assert.equal(result.isValid, true);
+  assert.equal(result.allowed, false);
+  assert.equal(result.status, 'BLOCKED_BY_ORDERING_POLICY');
+  assert.match(result.message, /Requested Rank 2 ≤ Currently Held Rank 2/);
+});
+
+test('Prevention Ordering: Held Rank 2, Requested Rank 3 is ALLOWED (ORDERING_POLICY_SATISFIED)', () => {
+  const result = evaluateOrderingRanks(2, 3);
+  assert.equal(result.isValid, true);
+  assert.equal(result.allowed, true);
+  assert.equal(result.status, 'ORDERING_POLICY_SATISFIED');
+  assert.match(result.message, /ORDERING POLICY SATISFIED/);
+  assert.match(result.message, /Requested Rank 3 > Currently Held Rank 2/);
+});
+
+test('Prevention Ordering: Invalid or nonpositive ranks return validation error', () => {
+  const zeroRank = evaluateOrderingRanks(0, 2);
+  assert.equal(zeroRank.isValid, false);
+  assert.equal(zeroRank.allowed, false);
+  assert.equal(zeroRank.status, 'INVALID_INPUT');
+
+  const negRank = evaluateOrderingRanks(-1, 2);
+  assert.equal(negRank.isValid, false);
+  assert.equal(negRank.allowed, false);
+  assert.equal(negRank.status, 'INVALID_INPUT');
+
+  const nonIntRank = evaluateOrderingRanks(2.5, 3);
+  assert.equal(nonIntRank.isValid, false);
+  assert.equal(nonIntRank.allowed, false);
+  assert.equal(nonIntRank.status, 'INVALID_INPUT');
+
+  const strInvalid = evaluateOrderingRanks('invalid', 2);
+  assert.equal(strInvalid.isValid, false);
+  assert.equal(strInvalid.allowed, false);
+  assert.equal(strInvalid.status, 'INVALID_INPUT');
+});
+
+test('Prevention All-At-Once: Demand [2, 2, 2] vs Available [1, 2, 1] is WAITING_AT_ADMISSION_GATE', () => {
+  const result = evaluateAllAtOnceAdmission([2, 2, 2], [1, 2, 1]);
+  assert.equal(result.isValid, true);
+  assert.equal(result.allowed, false);
+  assert.equal(result.status, 'WAITING_AT_ADMISSION_GATE');
+  assert.equal(result.shortages.length, 2);
+  assert.equal(result.shortages[0].resource, 'A');
+  assert.equal(result.shortages[0].deficit, 1);
+  assert.equal(result.shortages[1].resource, 'C');
+  assert.equal(result.shortages[1].deficit, 1);
+  assert.match(result.message, /HOLDS NOTHING/);
+});
+
+test('Prevention All-At-Once: Demand [2, 2, 2] vs Available [3, 3, 3] is ADMISSION_GRANTED', () => {
+  const result = evaluateAllAtOnceAdmission([2, 2, 2], [3, 3, 3]);
+  assert.equal(result.isValid, true);
+  assert.equal(result.allowed, true);
+  assert.equal(result.status, 'ADMISSION_GRANTED');
+  assert.equal(result.shortages.length, 0);
+  assert.match(result.message, /ADMISSION GRANTED/);
+});
+
+test('Prevention All-At-Once: Demand exactly equal to Available is ADMISSION_GRANTED', () => {
+  const result = evaluateAllAtOnceAdmission([2, 2, 2], [2, 2, 2]);
+  assert.equal(result.isValid, true);
+  assert.equal(result.allowed, true);
+  assert.equal(result.status, 'ADMISSION_GRANTED');
+  assert.equal(result.shortages.length, 0);
+});
+
+test('Prevention All-At-Once: Insufficient values in multiple resource types correctly identifies all shortages and deficits', () => {
+  const result = evaluateAllAtOnceAdmission([5, 4, 3], [1, 4, 0]);
+  assert.equal(result.isValid, true);
+  assert.equal(result.allowed, false);
+  assert.equal(result.status, 'WAITING_AT_ADMISSION_GATE');
+  assert.equal(result.shortages.length, 2);
+  assert.deepEqual(result.shortages[0], { resource: 'A', demand: 5, available: 1, deficit: 4 });
+  assert.deepEqual(result.shortages[1], { resource: 'C', demand: 3, available: 0, deficit: 3 });
+});
+
+test('Prevention All-At-Once: Negative or invalid quantities return validation error', () => {
+  const negDemand = evaluateAllAtOnceAdmission([-1, 2, 2], [1, 2, 1]);
+  assert.equal(negDemand.isValid, false);
+  assert.equal(negDemand.allowed, false);
+  assert.equal(negDemand.status, 'INVALID_INPUT');
+
+  const negAvail = evaluateAllAtOnceAdmission([2, 2, 2], [1, -2, 1]);
+  assert.equal(negAvail.isValid, false);
+  assert.equal(negAvail.allowed, false);
+  assert.equal(negAvail.status, 'INVALID_INPUT');
+
+  const nonInt = evaluateAllAtOnceAdmission([2.5, 2, 2], [1, 2, 1]);
+  assert.equal(nonInt.isValid, false);
+  assert.equal(nonInt.allowed, false);
+  assert.equal(nonInt.status, 'INVALID_INPUT');
+
+  const strInvalid = evaluateAllAtOnceAdmission(['foo', 2, 2], [1, 2, 1]);
+  assert.equal(strInvalid.isValid, false);
+  assert.equal(strInvalid.allowed, false);
+  assert.equal(strInvalid.status, 'INVALID_INPUT');
 });

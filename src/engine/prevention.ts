@@ -9,10 +9,10 @@
 
 import { PreventionSimulationResult } from './types.js';
 
-export { checkOrderingPolicy } from './preventionOrdering.js';
-export type { OrderingPolicyCheckResult } from './preventionOrdering.js';
-export { checkAllAtOncePolicy } from './preventionAllAtOnce.js';
-export type { AllAtOnceCheckResult } from './preventionAllAtOnce.js';
+export { checkOrderingPolicy, evaluateOrderingRanks } from './preventionOrdering.js';
+export type { OrderingPolicyCheckResult, RankOrderingResult } from './preventionOrdering.js';
+export { checkAllAtOncePolicy, evaluateAllAtOnceAdmission } from './preventionAllAtOnce.js';
+export type { AllAtOnceCheckResult, AllAtOnceAdmissionResult } from './preventionAllAtOnce.js';
 
 /**
  * Provides empirical / theoretical trade-off comparison data for OS prevention techniques.

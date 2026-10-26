@@ -18,6 +18,57 @@ export interface OrderingPolicyCheckResult {
   resourcesToRelease: number[];
 }
 
+export interface RankOrderingResult {
+  isValid: boolean;
+  allowed: boolean;
+  heldRank: number;
+  requestedRank: number;
+  status: 'ORDERING_POLICY_SATISFIED' | 'BLOCKED_BY_ORDERING_POLICY' | 'INVALID_INPUT';
+  message: string;
+}
+
+/**
+ * Direct rank evaluation for Havender's Fixed Resource Ordering.
+ * Rule: Request Allowed by Ordering Policy = Requested Rank > Held Rank
+ * Validates that both ranks are positive integers (>= 1).
+ */
+export function evaluateOrderingRanks(
+  heldRankInput: number | string,
+  requestedRankInput: number | string
+): RankOrderingResult {
+  const heldStr = String(heldRankInput).trim();
+  const reqStr = String(requestedRankInput).trim();
+
+  const heldNum = Number(heldStr);
+  const reqNum = Number(reqStr);
+
+  const isPositiveInt = (n: number, s: string) =>
+    s !== '' && !isNaN(n) && Number.isInteger(n) && n >= 1;
+
+  if (!isPositiveInt(heldNum, heldStr) || !isPositiveInt(reqNum, reqStr)) {
+    return {
+      isValid: false,
+      allowed: false,
+      heldRank: heldNum,
+      requestedRank: reqNum,
+      status: 'INVALID_INPUT',
+      message: 'Invalid input: Both Currently Held Rank and Requested Rank must be positive integers (≥ 1).',
+    };
+  }
+
+  const allowed = reqNum > heldNum;
+  return {
+    isValid: true,
+    allowed,
+    heldRank: heldNum,
+    requestedRank: reqNum,
+    status: allowed ? 'ORDERING_POLICY_SATISFIED' : 'BLOCKED_BY_ORDERING_POLICY',
+    message: allowed
+      ? `ORDERING POLICY SATISFIED: Requested Rank ${reqNum} > Currently Held Rank ${heldNum}. Strict ascending order (R1 < R2 < ... < Rn) is maintained; circular wait is mathematically eliminated.`
+      : `BLOCKED BY ORDERING POLICY: Requested Rank ${reqNum} ≤ Currently Held Rank ${heldNum}. Requesting equal or lower ranks violates strict ascending order. To prevent circular wait, the process must release Rank ${heldNum} first.`,
+  };
+}
+
 export function checkOrderingPolicy(
   processId: number,
   requestedResourceIndex: number,
