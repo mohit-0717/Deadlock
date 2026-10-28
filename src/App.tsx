@@ -104,21 +104,49 @@ export default function App() {
       </main>
 
       {/* 3. Clean Academic Footer */}
-      <footer className="border-t border-slate-200 bg-white py-3.5 px-4 sm:px-6 text-xs text-slate-500 mt-auto">
-        <div className="w-full max-w-[1720px] mx-auto flex flex-col sm:flex-row items-center justify-between gap-2">
-          <div className="flex items-center gap-2">
-            <span className="w-2 h-2 rounded-full bg-indigo-600" />
-            <span className="font-semibold text-slate-700">
-              Operating Systems Deadlock Simulator
-            </span>
-            <span className="text-slate-300">&bull;</span>
-            <span className="text-slate-500">
-              Banker&apos;s Avoidance &bull; Resource Allocation Graphs &bull; Havender Prevention
+      <footer className="border-t border-slate-200 bg-white py-4 px-4 sm:px-6 text-xs text-slate-600 mt-auto shadow-2xs">
+        <div className="w-full max-w-[1720px] mx-auto space-y-3">
+          {/* Top row: Project Title & Reference */}
+          <div className="flex flex-col sm:flex-row items-center justify-between gap-2 border-b border-slate-100 pb-2.5">
+            <div className="flex flex-wrap items-center gap-2">
+              <span className="w-2 h-2 rounded-full bg-indigo-600 shrink-0" />
+              <span className="font-bold text-slate-800">
+                Operating Systems Deadlock Simulator (DeadlockLab)
+              </span>
+              <span className="text-slate-300 hidden sm:inline">&bull;</span>
+              <span className="text-slate-500">
+                Banker&apos;s Avoidance &bull; Resource Allocation Graphs &bull; Havender Prevention
+              </span>
+            </div>
+            <span className="text-slate-400 font-medium text-[11px]">
+              Standard Textbook Model (Silberschatz, Galvin &amp; Gagne)
             </span>
           </div>
-          <span className="text-slate-400">
-            Standard Textbook Algorithms (Silberschatz, Galvin &amp; Gagne)
-          </span>
+
+          {/* Bottom row: Group Members & Project Guide */}
+          <div className="flex flex-col md:flex-row items-start md:items-center justify-between gap-3 text-xs">
+            <div className="flex flex-col sm:flex-row sm:items-center gap-1.5 sm:gap-2 flex-wrap">
+              <span className="font-bold text-indigo-950 bg-indigo-50 px-2 py-0.5 rounded border border-indigo-200 shrink-0">
+                Group Members:
+              </span>
+              <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-slate-700">
+                <span>Suraj Aglave <span className="font-mono text-slate-500 font-semibold">(202401040060)</span></span>
+                <span className="text-slate-300 hidden sm:inline">&bull;</span>
+                <span>Mohit Bankhele <span className="font-mono text-slate-500 font-semibold">(202401040059)</span></span>
+                <span className="text-slate-300 hidden sm:inline">&bull;</span>
+                <span>Siddhesh Shinde <span className="font-mono text-slate-500 font-semibold">(202401040176)</span></span>
+                <span className="text-slate-300 hidden sm:inline">&bull;</span>
+                <span>Aditya Patil <span className="font-mono text-slate-500 font-semibold">(202401040127)</span></span>
+              </div>
+            </div>
+
+            <div className="flex items-center gap-1.5 shrink-0">
+              <span className="font-semibold text-slate-500">Guided by:</span>
+              <span className="font-bold text-slate-900 bg-slate-100 px-2 py-0.5 rounded border border-slate-200">
+                Mr. VijayKumar Mantri
+              </span>
+            </div>
+          </div>
         </div>
       </footer>
     </div>

@@ -161,4 +161,13 @@ Creates an optimized production build in the `dist/` directory.
 
 ## Authors & Academic Integrity
 
+**Group Members:**
+- **Suraj Aglave** – `202401040060`
+- **Mohit Bankhele** – `202401040059`
+- **Siddhesh Shinde** – `202401040176`
+- **Aditya Patil** – `202401040127`
+
+**Guided by:**
+- **Mr. VijayKumar Mantri**
+
 Developed for undergraduate Computer Engineering Operating Systems coursework. All algorithm implementations strictly adhere to the academic mathematical specifications defined in Silberschatz, Galvin & Gagne's *Operating System Concepts*.
